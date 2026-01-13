@@ -11,7 +11,8 @@
 
 ## High-level pipeline
 1. **Ingest**
-   - Fetch OHLCV candles incrementally (since last timestamp with a small overlap) and optional orderbook snapshots via ccxt.
+   - Fetch OHLCV candles incrementally (since last timestamp with a small overlap). If the exchange lacks `fetchOHLCV`, build candles from `fetchTrades` when available.
+   - Optional orderbook snapshots via ccxt.
    - Fetch RSS articles, normalize, and deduplicate.
 2. **Feature extraction**
    - Convert normalized news to safe features: sentiment score, keyword flags, source weights.

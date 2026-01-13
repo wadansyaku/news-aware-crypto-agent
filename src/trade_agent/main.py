@@ -121,6 +121,7 @@ def ingest(
 
     symbols = [symbol] if symbol else settings.trading.symbol_whitelist
     total_candles = 0
+    ingest_errors = []
     for sym in symbols:
         for timeframe in settings.trading.timeframes:
             since = None
@@ -128,19 +129,29 @@ def ingest(
             frame_ms = _timeframe_ms(exchange_client, timeframe)
             if last_ts is not None and frame_ms:
                 since = max(last_ts - frame_ms, 0)
-            candles = exchange_client.fetch_candles(
-                sym, timeframe=timeframe, limit=settings.trading.candle_limit, since=since
-            )
-            total_candles += db.insert_candles(conn, sym, timeframe, candles)
+            try:
+                candles = exchange_client.fetch_candles(
+                    sym, timeframe=timeframe, limit=settings.trading.candle_limit, since=since
+                )
+                total_candles += db.insert_candles(conn, sym, timeframe, candles)
+            except Exception as exc:  # noqa: BLE001
+                ingest_errors.append(
+                    {"symbol": sym, "timeframe": timeframe, "error": str(exc)}
+                )
 
         if orderbook:
-            ob = exchange_client.fetch_orderbook(sym)
-            bid = float(ob["bids"][0][0]) if ob.get("bids") else 0.0
-            ask = float(ob["asks"][0][0]) if ob.get("asks") else 0.0
-            bid_size = float(ob["bids"][0][1]) if ob.get("bids") else 0.0
-            ask_size = float(ob["asks"][0][1]) if ob.get("asks") else 0.0
-            ts = int(ob.get("timestamp") or int(datetime.now(timezone.utc).timestamp() * 1000))
-            db.insert_orderbook_snapshot(conn, sym, bid, ask, bid_size, ask_size, ts)
+            try:
+                ob = exchange_client.fetch_orderbook(sym)
+                bid = float(ob["bids"][0][0]) if ob.get("bids") else 0.0
+                ask = float(ob["asks"][0][0]) if ob.get("asks") else 0.0
+                bid_size = float(ob["bids"][0][1]) if ob.get("bids") else 0.0
+                ask_size = float(ob["asks"][0][1]) if ob.get("asks") else 0.0
+                ts = int(
+                    ob.get("timestamp") or int(datetime.now(timezone.utc).timestamp() * 1000)
+                )
+                db.insert_orderbook_snapshot(conn, sym, bid, ask, bid_size, ask_size, ts)
+            except Exception as exc:  # noqa: BLE001
+                ingest_errors.append({"symbol": sym, "orderbook": True, "error": str(exc)})
 
     news_stats = ingest_rss(conn, settings.news.rss_urls) if settings.news.rss_urls else {}
     articles = db.list_articles_without_features(conn)
@@ -165,6 +176,7 @@ def ingest(
             "candles": total_candles,
             "news": news_stats,
             "features_added": len(articles),
+            "errors": ingest_errors,
         },
     )
     typer.echo(
@@ -173,6 +185,7 @@ def ingest(
                 "candles": total_candles,
                 "news": news_stats,
                 "features_added": len(articles),
+                "errors": ingest_errors,
             },
             indent=2,
         )

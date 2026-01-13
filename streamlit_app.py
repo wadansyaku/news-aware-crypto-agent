@@ -137,25 +137,34 @@ with st.expander("取り込み", expanded=False):
         conn = _get_conn(settings)
         exchange_client = build_exchange(settings.exchange)
         total_candles = 0
+        ingest_errors = []
         for timeframe in settings.trading.timeframes:
             since = None
             last_ts = db.get_latest_candle_ts(conn, symbol, timeframe)
             frame_ms = _timeframe_ms(exchange_client, timeframe)
             if last_ts is not None and frame_ms:
                 since = max(last_ts - frame_ms, 0)
-            candles = exchange_client.fetch_candles(
-                symbol, timeframe=timeframe, limit=settings.trading.candle_limit, since=since
-            )
-            total_candles += db.insert_candles(conn, symbol, timeframe, candles)
+            try:
+                candles = exchange_client.fetch_candles(
+                    symbol, timeframe=timeframe, limit=settings.trading.candle_limit, since=since
+                )
+                total_candles += db.insert_candles(conn, symbol, timeframe, candles)
+            except Exception as exc:  # noqa: BLE001
+                ingest_errors.append({"symbol": symbol, "timeframe": timeframe, "error": str(exc)})
 
         if orderbook:
-            ob = exchange_client.fetch_orderbook(symbol)
-            bid = float(ob["bids"][0][0]) if ob.get("bids") else 0.0
-            ask = float(ob["asks"][0][0]) if ob.get("asks") else 0.0
-            bid_size = float(ob["bids"][0][1]) if ob.get("bids") else 0.0
-            ask_size = float(ob["asks"][0][1]) if ob.get("asks") else 0.0
-            ts = int(ob.get("timestamp") or int(datetime.now(timezone.utc).timestamp() * 1000))
-            db.insert_orderbook_snapshot(conn, symbol, bid, ask, bid_size, ask_size, ts)
+            try:
+                ob = exchange_client.fetch_orderbook(symbol)
+                bid = float(ob["bids"][0][0]) if ob.get("bids") else 0.0
+                ask = float(ob["asks"][0][0]) if ob.get("asks") else 0.0
+                bid_size = float(ob["bids"][0][1]) if ob.get("bids") else 0.0
+                ask_size = float(ob["asks"][0][1]) if ob.get("asks") else 0.0
+                ts = int(
+                    ob.get("timestamp") or int(datetime.now(timezone.utc).timestamp() * 1000)
+                )
+                db.insert_orderbook_snapshot(conn, symbol, bid, ask, bid_size, ask_size, ts)
+            except Exception as exc:  # noqa: BLE001
+                ingest_errors.append({"symbol": symbol, "orderbook": True, "error": str(exc)})
 
         news_stats = ingest_rss(conn, settings.news.rss_urls) if settings.news.rss_urls else {}
         articles = db.list_articles_without_features(conn)
@@ -177,9 +186,12 @@ with st.expander("取り込み", expanded=False):
             "candles": total_candles,
             "news": news_stats,
             "features_added": len(articles),
+            "errors": ingest_errors,
         }
         db.log_event(conn, "ingest", result)
         st.json(result)
+        if ingest_errors:
+            st.warning("一部の取り込みでエラーが発生しました。詳細は `errors` を確認してください。")
         conn.close()
 
 

@@ -60,6 +60,8 @@ Edit `config.yaml`:
 - `news.rss_urls`: feeds to ingest.
 - `paper.*`: deterministic simulation settings.
 
+Note: If the exchange does not support `fetchOHLCV`, the app falls back to building candles from `fetchTrades` when available.
+
 ## Testing
 ```bash
 uv run pytest
