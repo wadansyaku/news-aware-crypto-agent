@@ -85,6 +85,14 @@ def status(config: str = typer.Option("config.yaml", help="Path to config.yaml")
     conn = _get_conn(settings)
     exchange_client = build_exchange(settings.exchange)
     exchange_ok, exchange_msg = check_public_connection(exchange_client)
+    caps = exchange_client.exchange.has
+    ohlcv_source = (
+        "fetchOHLCV"
+        if caps.get("fetchOHLCV")
+        else "fetchTrades"
+        if caps.get("fetchTrades")
+        else "unavailable"
+    )
 
     news_ok = False
     news_msg = "not configured"
@@ -100,6 +108,13 @@ def status(config: str = typer.Option("config.yaml", help="Path to config.yaml")
         json.dumps(
             {
                 "exchange": {"ok": exchange_ok, "message": exchange_msg},
+                "exchange_capabilities": {
+                    "fetchOHLCV": bool(caps.get("fetchOHLCV")),
+                    "fetchTrades": bool(caps.get("fetchTrades")),
+                    "fetchTime": bool(caps.get("fetchTime")),
+                    "postOnly": bool(caps.get("postOnly")),
+                    "ohlcv_source": ohlcv_source,
+                },
                 "news": {"ok": news_ok, "message": news_msg},
                 "db_path": resolve_db_path(settings),
             },
@@ -233,9 +248,10 @@ def propose(
             news_features,
             settings.risk,
             settings.strategies.baseline,
-            settings.strategies.news_overlay,
-        )
+                settings.strategies.news_overlay,
+            )
 
+    current_position = db.get_position_size(conn, symbol)
     if plan.side in {"buy", "sell"} and settings.trading.post_only:
         if not exchange_client.exchange.has.get("postOnly"):
             try:
@@ -266,7 +282,9 @@ def propose(
                 pass
 
     original_size = plan.size
-    risk_result = evaluate_plan(conn, plan, settings.risk, settings.trading)
+    risk_result = evaluate_plan(
+        conn, plan, settings.risk, settings.trading, current_position=current_position
+    )
     adjusted_size = risk_result.plan.size if risk_result.plan else 0.0
     db.log_event(
         conn,
@@ -282,7 +300,19 @@ def propose(
         },
     )
     if not risk_result.approved or not risk_result.plan:
-        typer.echo(json.dumps({"status": "rejected", "reason": risk_result.reason}, indent=2))
+        if risk_result.plan and risk_result.plan.side == "hold":
+            typer.echo(
+                json.dumps(
+                    {
+                        "status": "hold",
+                        "reason": risk_result.reason,
+                        "rationale": risk_result.plan.rationale,
+                    },
+                    indent=2,
+                )
+            )
+        else:
+            typer.echo(json.dumps({"status": "rejected", "reason": risk_result.reason}, indent=2))
         conn.close()
         return
 

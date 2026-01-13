@@ -72,5 +72,6 @@
 - **Paper default**: config defaults to paper + dry run.
 - **Human approval**: `trading.require_approval` must be satisfied unless autopilot constraints pass.
 - **Live double-consent**: both env and config flags are required for live execution.
+- **Long-only**: sells are only allowed when a spot position exists; otherwise proposals become hold.
 - **Risk limits**: kill switch, daily loss proxy, order count, cooldown, position sizing, notional caps.
 - **Spot only**: no leverage, margin, futures, or shorts.

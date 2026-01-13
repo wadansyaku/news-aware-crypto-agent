@@ -81,6 +81,13 @@ def evaluate_plan(
     position = current_position if current_position is not None else db.get_position_size(conn, plan.symbol)
 
     if plan.side == "sell" and position <= 0:
+        if trading.long_only:
+            hold_plan = TradePlan.hold(
+                symbol=plan.symbol,
+                strategy=plan.strategy,
+                rationale="long-only: no position to sell",
+            )
+            return RiskResult(approved=False, reason="long-only: no position to sell", plan=hold_plan)
         return RiskResult(approved=False, reason="no position to sell")
 
     max_position_size = (risk.capital_jpy * risk.max_position_pct) / plan.price

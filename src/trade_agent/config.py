@@ -35,6 +35,7 @@ class TradingConfig:
     approval_phrase: str
     kill_switch: bool
     i_understand_live_trading: bool
+    long_only: bool
     symbol_whitelist: list[str]
     base_currency: str
     timeframes: list[str]
@@ -151,6 +152,7 @@ DEFAULTS: dict[str, Any] = {
         "approval_phrase": "I APPROVE",
         "kill_switch": False,
         "i_understand_live_trading": False,
+        "long_only": True,
         "symbol_whitelist": ["BTC/JPY"],
         "base_currency": "JPY",
         "timeframes": ["1m"],
@@ -299,6 +301,9 @@ def load_config(path: str) -> AppSettings:
                 "i_understand_live_trading",
                 default=DEFAULTS["trading"]["i_understand_live_trading"],
             )
+        ),
+        long_only=bool(
+            _get(merged, "trading", "long_only", default=DEFAULTS["trading"]["long_only"])
         ),
         symbol_whitelist=list(
             _get(

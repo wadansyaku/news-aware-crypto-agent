@@ -21,6 +21,7 @@ trading:
   approval_phrase: "I APPROVE"
   kill_switch: false
   i_understand_live_trading: false
+  long_only: true
   symbol_whitelist:
     - "BTC/JPY"
   base_currency: JPY

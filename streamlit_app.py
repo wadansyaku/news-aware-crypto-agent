@@ -112,6 +112,14 @@ with st.expander("ステータス", expanded=True):
         exchange_client = build_exchange(settings.exchange)
         exchange_ok, exchange_msg = check_public_connection(exchange_client)
         exchange_msg = f"OK ({exchange_msg})" if exchange_ok else f"エラー: {exchange_msg}"
+        caps = exchange_client.exchange.has
+        ohlcv_source = (
+            "fetchOHLCV"
+            if caps.get("fetchOHLCV")
+            else "fetchTrades"
+            if caps.get("fetchTrades")
+            else "unavailable"
+        )
         news_ok = False
         news_msg = "未設定"
         if settings.news.rss_urls:
@@ -124,6 +132,13 @@ with st.expander("ステータス", expanded=True):
         st.json(
             {
                 "exchange": {"ok": exchange_ok, "message": exchange_msg},
+                "exchange_capabilities": {
+                    "fetchOHLCV": bool(caps.get("fetchOHLCV")),
+                    "fetchTrades": bool(caps.get("fetchTrades")),
+                    "fetchTime": bool(caps.get("fetchTime")),
+                    "postOnly": bool(caps.get("postOnly")),
+                    "ohlcv_source": ohlcv_source,
+                },
                 "news": {"ok": news_ok, "message": news_msg},
                 "db_path": db_path,
             }
@@ -219,6 +234,11 @@ with st.expander("提案", expanded=False):
             st.error("ローソク足がありません。先に取り込みを実行してください。")
             conn.close()
         else:
+            pos_size, avg_cost = db.get_position_state(conn, symbol)
+            if pos_size > 0:
+                st.info(f"現在のポジション: {pos_size:.6f} / 平均コスト: {avg_cost:.2f}")
+            else:
+                st.info("現在のポジション: なし（ロングオンリー）")
             news_features = _recent_news(conn, settings)
             if strategy == "baseline":
                 plan = baseline.generate_plan(
@@ -264,7 +284,9 @@ with st.expander("提案", expanded=False):
                         pass
 
             original_size = plan.size
-            risk_result = evaluate_plan(conn, plan, settings.risk, settings.trading)
+            risk_result = evaluate_plan(
+                conn, plan, settings.risk, settings.trading, current_position=pos_size
+            )
             adjusted_size = risk_result.plan.size if risk_result.plan else 0.0
             db.log_event(
                 conn,
@@ -280,7 +302,16 @@ with st.expander("提案", expanded=False):
                 },
             )
             if not risk_result.approved or not risk_result.plan:
-                st.json({"status": "rejected", "reason": risk_result.reason})
+                if risk_result.plan and risk_result.plan.side == "hold":
+                    st.json(
+                        {
+                            "status": "hold",
+                            "reason": risk_result.reason,
+                            "rationale": risk_result.plan.rationale,
+                        }
+                    )
+                else:
+                    st.json({"status": "rejected", "reason": risk_result.reason})
             else:
                 plan = risk_result.plan
                 intent = from_plan(

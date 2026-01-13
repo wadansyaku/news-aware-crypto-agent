@@ -14,6 +14,7 @@ def _make_trading(kill_switch: bool) -> TradingConfig:
         approval_phrase="I APPROVE",
         kill_switch=kill_switch,
         i_understand_live_trading=False,
+        long_only=True,
         symbol_whitelist=["BTC/JPY"],
         base_currency="JPY",
         timeframes=["1m"],

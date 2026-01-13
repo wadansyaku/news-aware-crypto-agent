@@ -56,6 +56,7 @@ Edit `config.yaml`:
 - `exchange.name`: ccxt exchange id (spot only).
 - `trading.symbol_whitelist`: allowed symbols.
 - `trading.maker_emulation`: maker-style price padding when `postOnly` is unavailable.
+- `trading.long_only`: spot-only long bias (sell only when a position exists).
 - `risk.*`: position, loss, and rate limits.
 - `news.rss_urls`: feeds to ingest.
 - `paper.*`: deterministic simulation settings.
