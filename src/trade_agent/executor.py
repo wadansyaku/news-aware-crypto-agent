@@ -15,6 +15,8 @@ from trade_agent.exchange import ExchangeClient, has_credentials
 from trade_agent.intent import OrderIntent, intent_expired
 from trade_agent.paper import OrderbookSnapshot, build_rng, estimate_orderbook_from_price, simulate_fill
 
+MAKER_BUFFER_BPS = 0.1
+
 
 @dataclass
 class ExecutionResult:
@@ -64,6 +66,50 @@ def _autopilot_ok(settings: AppSettings, intent: OrderIntent) -> bool:
     return True
 
 
+def _price_tick(exchange: object, symbol: str) -> float | None:
+    try:
+        market = exchange.market(symbol)
+        precision = market.get("precision", {}).get("price")
+        if isinstance(precision, int) and precision >= 0:
+            return 10 ** (-precision)
+    except Exception:  # noqa: BLE001
+        return None
+    return None
+
+
+def _emulate_post_only_price(
+    exchange_client: ExchangeClient, intent: OrderIntent
+) -> tuple[float, dict[str, object]]:
+    details: dict[str, object] = {"maker_emulation": True, "requested_price": intent.price}
+    try:
+        exchange_client.load_markets()
+        orderbook = exchange_client.fetch_orderbook(intent.symbol)
+    except Exception as exc:  # noqa: BLE001
+        details["maker_emulation_error"] = str(exc)
+        return intent.price, details
+
+    bid = float(orderbook["bids"][0][0]) if orderbook.get("bids") else 0.0
+    ask = float(orderbook["asks"][0][0]) if orderbook.get("asks") else 0.0
+    tick = _price_tick(exchange_client.exchange, intent.symbol)
+    base = bid or ask or intent.price
+    buffer = base * (MAKER_BUFFER_BPS / 10000)
+
+    price = intent.price
+    if intent.side == "buy" and bid > 0:
+        price = min(price, bid)
+        if ask > 0 and price >= ask:
+            pad = tick or buffer
+            price = max(bid - pad, 0.0)
+    elif intent.side == "sell" and ask > 0:
+        price = max(price, ask)
+        if bid > 0 and price <= bid:
+            pad = tick or buffer
+            price = ask + pad
+
+    details.update({"best_bid": bid, "best_ask": ask, "tick_size": tick, "placed_price": price})
+    return price, details
+
+
 def execute_intent(
     conn: sqlite3.Connection,
     intent_id: str,
@@ -88,7 +134,7 @@ def execute_intent(
         if settings.trading.dry_run:
             return ExecutionResult(status="rejected", message="dry_run enabled")
         ack_env = os.getenv("I_UNDERSTAND_LIVE_TRADING", "").lower() == "true"
-        if not (settings.trading.i_understand_live_trading or ack_env):
+        if not (settings.trading.i_understand_live_trading and ack_env):
             return ExecutionResult(status="rejected", message="live trading not acknowledged")
         if not has_credentials(settings.exchange):
             return ExecutionResult(status="rejected", message="missing API credentials")
@@ -159,8 +205,13 @@ def execute_intent(
         if exchange_client is None:
             return ExecutionResult(status="error", message="exchange client missing")
         try:
+            order_price = intent.price
+            details: dict[str, object] = {"requested_price": intent.price, "maker_emulation": False}
+            if settings.trading.post_only and not exchange_client.exchange.has.get("postOnly"):
+                order_price, emulation_details = _emulate_post_only_price(exchange_client, intent)
+                details.update(emulation_details)
             order = exchange_client.create_limit_order(
-                intent.symbol, intent.side, intent.size, intent.price, settings.trading.post_only
+                intent.symbol, intent.side, intent.size, order_price, settings.trading.post_only
             )
             order_id = order.get("id")
             deadline = time.time() + settings.trading.order_timeout_seconds
@@ -185,7 +236,12 @@ def execute_intent(
                 intent_hash=intent.hash(),
                 mode=mode,
                 status=status,
-                details={"order_id": order_id, "filled": filled, "avg_price": avg_price},
+                details={
+                    "order_id": order_id,
+                    "filled": filled,
+                    "avg_price": avg_price,
+                    **details,
+                },
             )
             if filled > 0:
                 db.insert_fill(
