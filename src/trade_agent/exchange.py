@@ -25,7 +25,22 @@ def _build_ohlcv_from_trades(
         since = int(time.time() * 1000) - tf_ms * limit
 
     trade_limit = min(max(limit * 50, 200), 1000)
-    trades = exchange.fetch_trades(symbol, since=since, limit=trade_limit)
+    max_batches = 5
+    trades: list[dict[str, Any]] = []
+    since_cursor = since
+    for _ in range(max_batches):
+        batch = exchange.fetch_trades(symbol, since=since_cursor, limit=trade_limit)
+        if not batch:
+            break
+        trades.extend(batch)
+        timestamps = [t.get("timestamp") for t in batch if t.get("timestamp") is not None]
+        if not timestamps:
+            break
+        last_ts = max(timestamps)
+        since_cursor = last_ts + 1
+        all_ts = [t.get("timestamp") for t in trades if t.get("timestamp") is not None]
+        if all_ts and max(all_ts) - min(all_ts) >= tf_ms * limit:
+            break
     buckets: dict[int, list[float]] = {}
     for trade in trades:
         ts = trade.get("timestamp")

@@ -414,6 +414,20 @@ def log_event(conn: sqlite3.Connection, event: str, data: dict[str, Any]) -> Non
     conn.commit()
 
 
+def list_audit_logs(
+    conn: sqlite3.Connection, event: str | None = None, limit: int = 100
+) -> list[sqlite3.Row]:
+    query = "SELECT * FROM audit_logs"
+    params: list[Any] = []
+    if event:
+        query += " WHERE event = ?"
+        params.append(event)
+    query += " ORDER BY ts DESC LIMIT ?"
+    params.append(limit)
+    cur = conn.execute(query, params)
+    return cur.fetchall()
+
+
 def get_daily_execution_count(conn: sqlite3.Connection, day: str) -> int:
     cur = conn.execute(
         """
@@ -561,4 +575,18 @@ def list_articles_without_features(conn: sqlite3.Connection, limit: int = 200) -
         """,
         (limit,),
     )
+    return cur.fetchall()
+
+
+def list_fills(
+    conn: sqlite3.Connection, symbol: str | None = None, limit: int = 1000
+) -> list[sqlite3.Row]:
+    query = "SELECT * FROM fills"
+    params: list[Any] = []
+    if symbol:
+        query += " WHERE symbol = ?"
+        params.append(symbol)
+    query += " ORDER BY ts ASC LIMIT ?"
+    params.append(limit)
+    cur = conn.execute(query, params)
     return cur.fetchall()

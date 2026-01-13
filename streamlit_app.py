@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -31,6 +32,12 @@ st.set_page_config(page_title="トレードエージェント UI", layout="wide"
 st.title("トレードエージェント UI")
 st.caption("ローカル中心の研究用アプリです。収益性は保証しません。")
 st.warning("現物のみ。デフォルトで人の承認が必要です。自己責任で利用してください。")
+
+st.subheader("最短で試す (3ステップ)")
+step1, step2, step3 = st.columns(3)
+step1.markdown("**1. 取り込み**\\n価格とニュースを取得します。")
+step2.markdown("**2. 提案**\\n売買の提案を作成します。")
+step3.markdown("**3. 承認→実行**\\n承認後にペーパー実行します。")
 
 
 def _load_settings(path: str) -> AppSettings:
@@ -95,8 +102,26 @@ def _list_intents(conn: sqlite3.Connection, limit: int = 20) -> list[dict[str, A
     return [dict(row) for row in cur.fetchall()]
 
 
+def _summarize_audit(row: sqlite3.Row) -> dict[str, Any]:
+    data = json.loads(row["data_json"]) if row["data_json"] else {}
+    return {
+        "ts": row["ts"],
+        "event": row["event"],
+        "symbol": data.get("symbol", ""),
+        "side": data.get("side", ""),
+        "status": data.get("status", data.get("mode", "")),
+        "reason": data.get("reason", data.get("message", "")),
+        "original_size": data.get("original_size", ""),
+        "adjusted_size": data.get("adjusted_size", ""),
+    }
+
+
 st.sidebar.header("設定")
 config_path = st.sidebar.text_input("config.yaml のパス", "config.yaml")
+with st.sidebar.expander("取引所切替ガイド", expanded=False):
+    st.markdown(
+        """- ポイント: `fetchOHLCV` 対応の取引所だと安定します。\n- 例: `binance`, `kraken`, `bitstamp`（利用可能地域は要確認）\n- 設定変更: `config.yaml` の `exchange.name` と `trading.symbol_whitelist` を変更\n- JPYペアが無い場合は USDT ペアへ切替"""
+    )
 
 try:
     settings = _load_settings(config_path)
@@ -379,6 +404,18 @@ with st.expander("実行", expanded=False):
             conn.close()
 
 
+with st.expander("監査ログ", expanded=False):
+    conn = _get_conn(settings)
+    logs = db.list_audit_logs(conn, limit=200)
+    conn.close()
+    events = sorted({row["event"] for row in logs})
+    filter_event = st.selectbox("イベント", ["全て"] + events)
+    if filter_event != "全て":
+        logs = [row for row in logs if row["event"] == filter_event]
+    summary = [_summarize_audit(row) for row in logs]
+    st.dataframe(summary, use_container_width=True)
+
+
 with st.expander("バックテスト", expanded=False):
     start_date = st.date_input("開始日")
     end_date = st.date_input("終了日")
@@ -435,3 +472,46 @@ with st.expander("レポート", expanded=False):
         )
         st.json({"metrics": metrics.__dict__, "paths": {**paths, "trades": trade_csv}})
         conn.close()
+
+
+with st.expander("ポジションと損益", expanded=False):
+    symbol_view = st.selectbox("対象銘柄", settings.trading.symbol_whitelist, key="pos_symbol")
+    pnl_mode_label = st.selectbox("モード", ["全て", "ペーパー", "ライブ"], key="pnl_mode")
+    pnl_mode = (
+        None
+        if pnl_mode_label == "全て"
+        else "paper"
+        if pnl_mode_label == "ペーパー"
+        else "live"
+    )
+    conn = _get_conn(settings)
+    pos_size, avg_cost = db.get_position_state(conn, symbol_view)
+    st.metric("現在のポジション", f"{pos_size:.6f}")
+    st.metric("平均コスト", f"{avg_cost:.2f}")
+
+    fills = db.list_fills(conn, symbol=symbol_view, limit=1000)
+    position = 0.0
+    position_series = []
+    for row in fills:
+        size = float(row["size"])
+        if row["side"] == "buy":
+            position += size
+        else:
+            position -= size
+        position_series.append({"ts": row["ts"], "position": position})
+    if position_series:
+        st.line_chart(position_series, x="ts", y="position")
+    else:
+        st.info("ポジション履歴はまだありません。")
+
+    trades = load_trades_from_db(conn, pnl_mode)
+    _, equity = compute_metrics(trades)
+    if equity:
+        st.line_chart(
+            [{"step": idx + 1, "equity": value} for idx, value in enumerate(equity)],
+            x="step",
+            y="equity",
+        )
+    else:
+        st.info("PnL履歴はまだありません。")
+    conn.close()
