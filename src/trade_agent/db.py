@@ -141,6 +141,7 @@ def insert_candles(
     conn: sqlite3.Connection, symbol: str, timeframe: str, candles: Iterable[list[Any]]
 ) -> int:
     ingested_at = utc_now_iso()
+    before = conn.total_changes
     rows = [
         (
             symbol,
@@ -164,7 +165,7 @@ def insert_candles(
         rows,
     )
     conn.commit()
-    return len(rows)
+    return conn.total_changes - before
 
 
 def fetch_candles(
@@ -536,6 +537,17 @@ def list_candles_between(
         (symbol, timeframe, start_ts, end_ts),
     )
     return cur.fetchall()
+
+
+def get_latest_candle_ts(conn: sqlite3.Connection, symbol: str, timeframe: str) -> int | None:
+    cur = conn.execute(
+        "SELECT MAX(ts) as max_ts FROM candles WHERE symbol = ? AND timeframe = ?",
+        (symbol, timeframe),
+    )
+    row = cur.fetchone()
+    if row and row["max_ts"] is not None:
+        return int(row["max_ts"])
+    return None
 
 
 def list_articles_without_features(conn: sqlite3.Connection, limit: int = 200) -> list[sqlite3.Row]:

@@ -27,24 +27,28 @@ This plan preserves the current CLI surface (`status`, `ingest`, `propose`, `app
 ### P1 — Data ingestion reliability
 3) **Incremental candle ingestion**
    - Track last candle timestamp per symbol/timeframe and request `since` to avoid redundant pulls.
-   - Acceptance criteria:
-     - Repeated `ingest` does not refetch overlapping candles beyond a small overlap window.
+    - Acceptance criteria:
+      - Repeated `ingest` does not refetch overlapping candles beyond a small overlap window.
+    - Status: implemented with one-candle overlap and `since` requests.
 
 4) **News ingestion robustness**
    - Add basic feed error reporting and per-feed stats.
-   - Acceptance criteria:
-     - `ingest` returns per-feed counts and errors without failing the whole run.
+    - Acceptance criteria:
+      - `ingest` returns per-feed counts and errors without failing the whole run.
+    - Status: implemented with `feeds` stats and `errors` list.
 
 ### P1 — Strategy/risk visibility
 5) **Risk explanation logging**
    - Log explicit risk rejections/adjustments into audit logs.
-   - Acceptance criteria:
-     - Each proposal records whether size was adjusted and why.
+    - Acceptance criteria:
+      - Each proposal records whether size was adjusted and why.
+    - Status: implemented via `risk_check` audit events.
 
 6) **Report enrichment**
    - Include trade list CSV with timestamps, side, price, size, fee, and pnl.
-   - Acceptance criteria:
-     - `report` produces a trade CSV alongside existing JSON/CSV outputs.
+    - Acceptance criteria:
+      - `report` produces a trade CSV alongside existing JSON/CSV outputs.
+    - Status: implemented.
 
 ### P2 — UI and operator UX
 7) **UI dashboards**

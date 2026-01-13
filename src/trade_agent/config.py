@@ -42,6 +42,13 @@ class TradingConfig:
     order_timeout_seconds: int
     post_only: bool
     intent_expiry_seconds: int
+    maker_emulation: "MakerEmulationConfig"
+
+
+@dataclass
+class MakerEmulationConfig:
+    buffer_bps: float
+    use_tick: bool
 
 
 @dataclass
@@ -151,6 +158,7 @@ DEFAULTS: dict[str, Any] = {
         "order_timeout_seconds": 30,
         "post_only": True,
         "intent_expiry_seconds": 900,
+        "maker_emulation": {"buffer_bps": 0.1, "use_tick": True},
     },
     "risk": {
         "capital_jpy": 500000,
@@ -345,6 +353,26 @@ def load_config(path: str) -> AppSettings:
                 "intent_expiry_seconds",
                 default=DEFAULTS["trading"]["intent_expiry_seconds"],
             )
+        ),
+        maker_emulation=MakerEmulationConfig(
+            buffer_bps=float(
+                _get(
+                    merged,
+                    "trading",
+                    "maker_emulation",
+                    "buffer_bps",
+                    default=DEFAULTS["trading"]["maker_emulation"]["buffer_bps"],
+                )
+            ),
+            use_tick=bool(
+                _get(
+                    merged,
+                    "trading",
+                    "maker_emulation",
+                    "use_tick",
+                    default=DEFAULTS["trading"]["maker_emulation"]["use_tick"],
+                )
+            ),
         ),
     )
 

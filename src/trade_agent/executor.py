@@ -15,8 +15,6 @@ from trade_agent.exchange import ExchangeClient, has_credentials
 from trade_agent.intent import OrderIntent, intent_expired
 from trade_agent.paper import OrderbookSnapshot, build_rng, estimate_orderbook_from_price, simulate_fill
 
-MAKER_BUFFER_BPS = 0.1
-
 
 @dataclass
 class ExecutionResult:
@@ -78,9 +76,17 @@ def _price_tick(exchange: object, symbol: str) -> float | None:
 
 
 def _emulate_post_only_price(
-    exchange_client: ExchangeClient, intent: OrderIntent
+    exchange_client: ExchangeClient,
+    intent: OrderIntent,
+    buffer_bps: float,
+    use_tick: bool,
 ) -> tuple[float, dict[str, object]]:
-    details: dict[str, object] = {"maker_emulation": True, "requested_price": intent.price}
+    details: dict[str, object] = {
+        "maker_emulation": True,
+        "requested_price": intent.price,
+        "buffer_bps": buffer_bps,
+        "use_tick": use_tick,
+    }
     try:
         exchange_client.load_markets()
         orderbook = exchange_client.fetch_orderbook(intent.symbol)
@@ -90,20 +96,20 @@ def _emulate_post_only_price(
 
     bid = float(orderbook["bids"][0][0]) if orderbook.get("bids") else 0.0
     ask = float(orderbook["asks"][0][0]) if orderbook.get("asks") else 0.0
-    tick = _price_tick(exchange_client.exchange, intent.symbol)
+    tick = _price_tick(exchange_client.exchange, intent.symbol) if use_tick else None
     base = bid or ask or intent.price
-    buffer = base * (MAKER_BUFFER_BPS / 10000)
+    buffer = base * (buffer_bps / 10000)
 
     price = intent.price
     if intent.side == "buy" and bid > 0:
         price = min(price, bid)
         if ask > 0 and price >= ask:
-            pad = tick or buffer
+            pad = tick if tick is not None else buffer
             price = max(bid - pad, 0.0)
     elif intent.side == "sell" and ask > 0:
         price = max(price, ask)
         if bid > 0 and price <= bid:
-            pad = tick or buffer
+            pad = tick if tick is not None else buffer
             price = ask + pad
 
     details.update({"best_bid": bid, "best_ask": ask, "tick_size": tick, "placed_price": price})
@@ -208,7 +214,12 @@ def execute_intent(
             order_price = intent.price
             details: dict[str, object] = {"requested_price": intent.price, "maker_emulation": False}
             if settings.trading.post_only and not exchange_client.exchange.has.get("postOnly"):
-                order_price, emulation_details = _emulate_post_only_price(exchange_client, intent)
+                order_price, emulation_details = _emulate_post_only_price(
+                    exchange_client,
+                    intent,
+                    settings.trading.maker_emulation.buffer_bps,
+                    settings.trading.maker_emulation.use_tick,
+                )
                 details.update(emulation_details)
             order = exchange_client.create_limit_order(
                 intent.symbol, intent.side, intent.size, order_price, settings.trading.post_only

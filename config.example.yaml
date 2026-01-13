@@ -30,6 +30,9 @@ trading:
   order_timeout_seconds: 30
   post_only: true
   intent_expiry_seconds: 900
+  maker_emulation:
+    buffer_bps: 0.1
+    use_tick: true
 
 risk:
   capital_jpy: 500000

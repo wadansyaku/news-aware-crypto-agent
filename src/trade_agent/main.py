@@ -14,7 +14,13 @@ from trade_agent.config import AppSettings, ensure_data_dir, load_config, resolv
 from trade_agent.exchange import build_exchange, check_public_connection
 from trade_agent.executor import execute_intent
 from trade_agent.intent import TradePlan, from_plan
-from trade_agent.metrics import compute_metrics, load_trades_from_db, save_report
+from trade_agent.metrics import (
+    compute_metrics,
+    load_trade_details_from_db,
+    load_trades_from_db,
+    save_report,
+    save_trade_csv,
+)
 from trade_agent.news.features import extract_features
 from trade_agent.news.normalize import NormalizedNews
 from trade_agent.news.rss import fetch_entries, ingest_rss
@@ -65,6 +71,14 @@ def _normalize_from_row(row: sqlite3.Row) -> NormalizedNews:
     )
 
 
+def _timeframe_ms(exchange_client: object, timeframe: str) -> int | None:
+    try:
+        seconds = exchange_client.exchange.parse_timeframe(timeframe)
+        return int(seconds * 1000)
+    except Exception:  # noqa: BLE001
+        return None
+
+
 @app.command()
 def status(config: str = typer.Option("config.yaml", help="Path to config.yaml")) -> None:
     settings = _load_settings(config)
@@ -109,8 +123,13 @@ def ingest(
     total_candles = 0
     for sym in symbols:
         for timeframe in settings.trading.timeframes:
+            since = None
+            last_ts = db.get_latest_candle_ts(conn, sym, timeframe)
+            frame_ms = _timeframe_ms(exchange_client, timeframe)
+            if last_ts is not None and frame_ms:
+                since = max(last_ts - frame_ms, 0)
             candles = exchange_client.fetch_candles(
-                sym, timeframe=timeframe, limit=settings.trading.candle_limit
+                sym, timeframe=timeframe, limit=settings.trading.candle_limit, since=since
             )
             total_candles += db.insert_candles(conn, sym, timeframe, candles)
 
@@ -233,7 +252,22 @@ def propose(
             except Exception:  # noqa: BLE001
                 pass
 
+    original_size = plan.size
     risk_result = evaluate_plan(conn, plan, settings.risk, settings.trading)
+    adjusted_size = risk_result.plan.size if risk_result.plan else 0.0
+    db.log_event(
+        conn,
+        "risk_check",
+        {
+            "symbol": plan.symbol,
+            "strategy": plan.strategy,
+            "side": plan.side,
+            "status": "approved" if risk_result.approved else "rejected",
+            "reason": risk_result.reason,
+            "original_size": original_size,
+            "adjusted_size": adjusted_size,
+        },
+    )
     if not risk_result.approved or not risk_result.plan:
         typer.echo(json.dumps({"status": "rejected", "reason": risk_result.reason}, indent=2))
         conn.close()
@@ -362,8 +396,16 @@ def report(
     metrics, equity = compute_metrics(trades)
     output_dir = str(Path(settings.app.data_dir) / "reports")
     paths = save_report(metrics, equity, output_dir, f"report_{mode or 'all'}")
-    db.log_event(conn, "report", {"mode": mode, "report_json": paths["json"]})
-    typer.echo(json.dumps({"metrics": metrics.__dict__, "paths": paths}, indent=2))
+    trade_details = load_trade_details_from_db(conn, mode)
+    trade_csv = save_trade_csv(trade_details, output_dir, f"report_{mode or 'all'}")
+    db.log_event(
+        conn,
+        "report",
+        {"mode": mode, "report_json": paths["json"], "trade_csv": trade_csv},
+    )
+    typer.echo(
+        json.dumps({"metrics": metrics.__dict__, "paths": {**paths, "trades": trade_csv}}, indent=2)
+    )
     conn.close()
 
 

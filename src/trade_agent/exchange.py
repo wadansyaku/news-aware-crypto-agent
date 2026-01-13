@@ -17,8 +17,10 @@ class ExchangeClient:
     def load_markets(self) -> None:
         self.exchange.load_markets()
 
-    def fetch_candles(self, symbol: str, timeframe: str, limit: int) -> list[list[Any]]:
-        return self.exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
+    def fetch_candles(
+        self, symbol: str, timeframe: str, limit: int, since: int | None = None
+    ) -> list[list[Any]]:
+        return self.exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit, since=since)
 
     def fetch_orderbook(self, symbol: str) -> dict[str, Any]:
         return self.exchange.fetch_order_book(symbol)

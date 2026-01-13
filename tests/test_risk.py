@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from trade_agent import db
-from trade_agent.config import RiskConfig, TradingConfig
+from trade_agent.config import MakerEmulationConfig, RiskConfig, TradingConfig
 from trade_agent.intent import TradePlan
 from trade_agent.risk import evaluate_plan
 
@@ -21,6 +21,7 @@ def _make_trading(kill_switch: bool) -> TradingConfig:
         order_timeout_seconds=10,
         post_only=True,
         intent_expiry_seconds=300,
+        maker_emulation=MakerEmulationConfig(buffer_bps=0.1, use_tick=True),
     )
 
 

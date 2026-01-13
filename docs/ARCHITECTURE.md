@@ -11,7 +11,7 @@
 
 ## High-level pipeline
 1. **Ingest**
-   - Fetch OHLCV candles (and optional orderbook snapshots) via ccxt.
+   - Fetch OHLCV candles incrementally (since last timestamp with a small overlap) and optional orderbook snapshots via ccxt.
    - Fetch RSS articles, normalize, and deduplicate.
 2. **Feature extraction**
    - Convert normalized news to safe features: sentiment score, keyword flags, source weights.
@@ -43,6 +43,7 @@
 - `src/trade_agent/intent.py`: OrderIntent signing + expiry. **Implemented**.
 - `src/trade_agent/paper.py`: Deterministic fill simulation. **Implemented**.
 - `src/trade_agent/executor.py`: Paper + live execution; live uses limit orders with maker emulation if `postOnly` is unsupported. **Implemented** (no market fallback).
+  - Maker emulation uses configurable `trading.maker_emulation` settings.
 - `src/trade_agent/backtest.py`: Candle + news latency backtest. **Implemented**.
 - `src/trade_agent/metrics.py`: PnL metrics + reports. **Implemented**.
 - `streamlit_app.py`: Optional UI for the same flows. **Implemented**.
