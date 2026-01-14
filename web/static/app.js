@@ -172,6 +172,10 @@ function openSafetyModal() {
   $("safety-cooldown-minutes").value = Number(risk.cooldown_minutes ?? 0);
   $("safety-cooldown-bypass").value = Number((risk.cooldown_bypass_pct ?? 0) * 100);
   $("safety-daily-loss").value = Number(risk.max_loss_jpy_per_day ?? 0);
+  const maxOrdersInput = $("safety-max-orders");
+  if (maxOrdersInput) {
+    maxOrdersInput.value = Number(risk.max_orders_per_day ?? 0);
+  }
   modal.classList.add("show");
   modal.setAttribute("aria-hidden", "false");
 }
@@ -188,6 +192,8 @@ async function handleSafetySubmit(event) {
   const cooldownMinutes = Number($("safety-cooldown-minutes").value);
   const bypassPct = Number($("safety-cooldown-bypass").value);
   const dailyLoss = Number($("safety-daily-loss").value);
+  const maxOrdersInput = $("safety-max-orders");
+  const maxOrders = maxOrdersInput ? Number(maxOrdersInput.value) : Number.NaN;
   const payload = {
     mode: $("safety-mode").value,
     dry_run: $("safety-dry-run").value === "true",
@@ -198,6 +204,7 @@ async function handleSafetySubmit(event) {
     cooldown_minutes: Number.isNaN(cooldownMinutes) ? null : cooldownMinutes,
     cooldown_bypass_pct: Number.isNaN(bypassPct) ? null : bypassPct / 100,
     max_loss_jpy_per_day: Number.isNaN(dailyLoss) ? null : dailyLoss,
+    max_orders_per_day: Number.isNaN(maxOrders) ? null : maxOrders,
   };
   try {
     await apiRequest("/api/config/safety", {
@@ -474,6 +481,10 @@ async function loadStatus() {
   $("cfg-autopilot").textContent = data.config.autopilot_enabled ? "ON" : "OFF";
   $("cfg-kill").textContent = data.config.kill_switch ? "ON" : "OFF";
   $("cfg-daily-loss").textContent = currency.format(data.config.risk.max_loss_jpy_per_day);
+  const maxOrdersNode = $("cfg-max-orders");
+  if (maxOrdersNode) {
+    maxOrdersNode.textContent = number.format(data.config.risk.max_orders_per_day || 0);
+  }
 
   $("pos-symbol").textContent = data.config.symbols[0] || "-";
   const defaultSymbol = data.config.symbols[0] || "";

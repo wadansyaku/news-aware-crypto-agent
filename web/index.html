@@ -74,8 +74,14 @@
               </div>
             </div>
             <div class="panel-foot">
-              <span class="label">日次損失上限</span>
-              <strong id="cfg-daily-loss">-</strong>
+              <div>
+                <span class="label">日次損失上限</span>
+                <strong id="cfg-daily-loss">-</strong>
+              </div>
+              <div>
+                <span class="label">最大注文/日</span>
+                <strong id="cfg-max-orders">-</strong>
+              </div>
             </div>
             <div class="panel-actions">
               <button class="btn btn-ghost" id="open-safety-modal">安全設定を編集</button>
@@ -850,6 +856,10 @@
             <label>
               <span>日次損失上限（JPY）</span>
               <input type="number" id="safety-daily-loss" min="0" step="1000" />
+            </label>
+            <label>
+              <span>最大注文数/日</span>
+              <input type="number" id="safety-max-orders" min="0" step="1" />
             </label>
           </div>
           <div class="hint">
