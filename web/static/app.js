@@ -62,6 +62,115 @@ function formatDuration(startIso) {
   return `${days}d ${rem}h`;
 }
 
+function formatMode(mode) {
+  if (mode === "paper") return "練習モード";
+  if (mode === "live") return "本番モード";
+  return mode || "-";
+}
+
+function formatSide(side) {
+  if (side === "buy") return "買い";
+  if (side === "sell") return "売り";
+  if (side === "hold") return "見送り";
+  return side || "-";
+}
+
+function formatIntentStatus(status) {
+  const map = {
+    proposed: "提案済み",
+    approved: "承認済み",
+    filled: "約定",
+    closed: "約定",
+    open: "注文中",
+    canceled: "取消",
+    cancelled: "取消",
+    rejected: "却下",
+    expired: "期限切れ",
+    error: "エラー",
+  };
+  return map[status] || status || "-";
+}
+
+function formatOutcome(outcome) {
+  const map = {
+    win: "勝ち",
+    loss: "負け",
+    flat: "引き分け",
+    open: "未確定",
+  };
+  return map[outcome] || outcome || "-";
+}
+
+function formatEventLabel(event) {
+  const map = {
+    propose: "提案",
+    approve: "承認",
+    approve_execute: "承認+実行",
+    execute: "実行",
+    risk_check: "リスク確認",
+    ingest: "取り込み",
+    report: "レポート",
+    backtest: "バックテスト",
+    config_update: "設定変更",
+    runner_start: "自動取り込み開始",
+    runner_stop: "自動取り込み停止",
+    external_ingest: "外部取り込み",
+  };
+  return map[event] || event || "-";
+}
+
+function formatRiskReason(reason) {
+  if (!reason) return "-";
+  const text = String(reason);
+  if (text.startsWith("risk rejected:")) {
+    const inner = text.replace("risk rejected:", "").trim();
+    return `リスクで却下: ${formatRiskReason(inner)}`;
+  }
+  const map = {
+    "cooldown active": "取引休止中（クールダウン）",
+    "max orders per day reached": "本日の上限に達しました",
+    "daily loss limit reached": "日次損失上限に到達",
+    "kill switch enabled": "緊急停止が有効",
+    "symbol not whitelisted": "許可されたシンボル外",
+    "invalid size or price": "数量/価格が無効",
+    "no position to sell": "売るポジションがありません",
+    "long-only: no position to sell": "買いのみ運用: 売るポジションがありません",
+    "size reduced to zero": "サイズが0になりました",
+    "no trade": "見送り",
+    "approval required": "承認が必要です",
+    "dry_run enabled": "練習モードが有効です",
+    "live trading not acknowledged": "本番取引の確認が未設定です",
+    "missing API credentials": "APIキーが未設定です",
+    "intent not found": "Intentが見つかりません",
+    "intent expired": "Intentの期限切れ",
+    "intent hash mismatch": "Intentが一致しません",
+  };
+  return map[text] || text;
+}
+
+function formatToggle(value, on = "有効", off = "無効") {
+  return value ? on : off;
+}
+
+function formatConfigUpdates(updates) {
+  if (!updates || typeof updates !== "object") return [];
+  const labels = [];
+  if ("mode" in updates) labels.push(`運用モード=${formatMode(updates.mode)}`);
+  if ("dry_run" in updates) labels.push(`実注文なし=${formatToggle(updates.dry_run)}`);
+  if ("require_approval" in updates) labels.push(`承認必須=${formatToggle(updates.require_approval)}`);
+  if ("kill_switch" in updates) labels.push(`緊急停止=${formatToggle(updates.kill_switch)}`);
+  if ("autopilot_enabled" in updates) labels.push(`自動実行=${formatToggle(updates.autopilot_enabled)}`);
+  if ("i_understand_live_trading" in updates)
+    labels.push(`本番確認=${formatToggle(updates.i_understand_live_trading)}`);
+  if ("cooldown_minutes" in updates) labels.push(`クールダウン=${updates.cooldown_minutes}分`);
+  if ("cooldown_bypass_pct" in updates)
+    labels.push(`急変時解除=${(updates.cooldown_bypass_pct * 100).toFixed(1)}%`);
+  if ("max_loss_jpy_per_day" in updates)
+    labels.push(`日次損失上限=${currency.format(updates.max_loss_jpy_per_day)}`);
+  if ("max_orders_per_day" in updates) labels.push(`最大注文/日=${updates.max_orders_per_day}`);
+  return labels;
+}
+
 function formatAge(seconds) {
   if (seconds === null || seconds === undefined || Number.isNaN(seconds)) return "-";
   const secs = Math.max(0, Math.floor(seconds));
@@ -99,7 +208,7 @@ function applyConfig(config) {
   $("cfg-symbols").textContent = config.symbols.join(", ");
   $("cfg-timeframes").textContent = config.timeframes.join(", ");
 
-  $("cfg-mode").textContent = config.mode;
+  $("cfg-mode").textContent = formatMode(config.mode);
   $("cfg-approval").textContent = config.require_approval ? "必須" : "不要";
   $("cfg-autopilot").textContent = config.autopilot_enabled ? "ON" : "OFF";
   $("cfg-kill").textContent = config.kill_switch ? "ON" : "OFF";
@@ -107,6 +216,10 @@ function applyConfig(config) {
   const maxOrdersNode = $("cfg-max-orders");
   if (maxOrdersNode) {
     maxOrdersNode.textContent = number.format(config.risk.max_orders_per_day || 0);
+  }
+  const phraseNode = $("cfg-phrase");
+  if (phraseNode) {
+    phraseNode.textContent = config.approval_phrase ? "設定済み" : "未設定";
   }
 
   $("pos-symbol").textContent = config.symbols[0] || "-";
@@ -318,11 +431,16 @@ async function handleSafetySubmit(event) {
     max_orders_per_day: Number.isNaN(maxOrders) ? null : maxOrders,
   };
   try {
-    await apiRequest("/api/config/safety", {
+    const response = await apiRequest("/api/config/safety", {
       method: "POST",
       body: JSON.stringify(payload),
     });
-    await loadStatus();
+    if (response?.config) {
+      applyConfig(response.config);
+    } else {
+      await loadConfigLight();
+    }
+    await loadRiskState();
     closeSafetyModal();
   } catch (err) {
     alert(`安全設定の保存に失敗: ${err.message}`);
@@ -554,7 +672,11 @@ function setOutput(el, title, lines = [], details = null, tone = "info") {
   const badge = tone === "error" ? "⚠" : tone === "ok" ? "✓" : "";
   const textLines = lines.map((line) => `<div>${line}</div>`).join("");
   const detailBlock = details
-    ? `<details><summary>詳細</summary><pre>${JSON.stringify(details, null, 2)}</pre></details>`
+    ? `<details><summary>詳細（開発者向け）</summary><pre>${JSON.stringify(
+        details,
+        null,
+        2
+      )}</pre></details>`
     : "";
   el.innerHTML = `<strong>${badge} ${title}</strong>${textLines}${detailBlock}`;
 }
@@ -688,8 +810,8 @@ function renderIntentsPreview(intents) {
     .map(
       (intent) => `<div class="mini-item">
         <span>${formatIso(intent.created_at)}</span>
-        <span>${intent.symbol} ${intent.side} ${number.format(intent.size)}</span>
-        <span>${intent.status}</span>
+        <span>${intent.symbol} ${formatSide(intent.side)} ${number.format(intent.size)}</span>
+        <span>${formatIntentStatus(intent.status)}</span>
       </div>`
     )
     .join("");
@@ -708,10 +830,10 @@ async function loadIntents() {
     row.innerHTML = `
       <td>${formatIso(intent.created_at)}</td>
       <td>${intent.symbol}</td>
-      <td>${intent.side}</td>
+      <td>${formatSide(intent.side)}</td>
       <td>${number.format(intent.size)}</td>
       <td>${currency.format(intent.price)}</td>
-      <td>${intent.status}</td>
+      <td>${formatIntentStatus(intent.status)}</td>
     `;
     row.addEventListener("click", () => {
       $("approve-intent").value = intent.intent_id;
@@ -757,37 +879,32 @@ function renderAuditList(logs) {
     .map((log) => {
       let summary = "";
       if (log.event === "risk_check") {
-        summary = `理由: ${log.data.reason || "-"}`;
+        summary = `理由: ${formatRiskReason(log.data?.reason)}`;
+      } else if (log.event === "approve_execute") {
+        summary = `承認+実行: ${formatIntentStatus(log.data?.status || "-")}`;
       } else if (log.event === "execute") {
-        summary = `結果: ${log.data.status || "-"}`;
+        summary = `結果: ${formatIntentStatus(log.data?.status || "-")}`;
       } else if (log.event === "config_update") {
         const updates = log.data?.updates || {};
-        const labels = [];
-        if ("mode" in updates) labels.push(`mode=${updates.mode}`);
-        if ("dry_run" in updates) labels.push(`dry_run=${updates.dry_run}`);
-        if ("require_approval" in updates) labels.push(`approval=${updates.require_approval}`);
-        if ("kill_switch" in updates) labels.push(`kill_switch=${updates.kill_switch}`);
-        if ("autopilot_enabled" in updates) labels.push(`autopilot=${updates.autopilot_enabled}`);
-        if ("i_understand_live_trading" in updates)
-          labels.push(`live_ack=${updates.i_understand_live_trading}`);
-        if ("cooldown_minutes" in updates) labels.push(`cooldown=${updates.cooldown_minutes}m`);
-        if ("cooldown_bypass_pct" in updates)
-          labels.push(`bypass=${(updates.cooldown_bypass_pct * 100).toFixed(1)}%`);
-        if ("max_loss_jpy_per_day" in updates)
-          labels.push(`daily_loss=${currency.format(updates.max_loss_jpy_per_day)}`);
-        if ("max_orders_per_day" in updates)
-          labels.push(`max_orders=${updates.max_orders_per_day}`);
+        const labels = formatConfigUpdates(updates);
         summary = labels.length ? `安全設定: ${labels.join(", ")}` : "安全設定の更新";
       } else if (log.event === "runner_start") {
-        summary = `開始: ${log.data.strategy || "-"} (${log.data.mode || "-"})`;
+        summary = `開始: ${log.data.strategy || "-"} (${formatMode(log.data.mode)})`;
       } else if (log.event === "runner_stop") {
         summary = "停止";
       }
+      const detailBlock = log.data
+        ? `<details class="audit-details"><summary>詳細（開発者向け）</summary><pre>${JSON.stringify(
+            log.data,
+            null,
+            2
+          )}</pre></details>`
+        : "";
       return `
         <div class="audit-item">
-          <h4>${formatIso(log.ts)} / ${log.event}</h4>
+          <h4 title="${log.event}">${formatIso(log.ts)} / ${formatEventLabel(log.event)}</h4>
           <div>${summary}</div>
-          <pre>${JSON.stringify(log.data, null, 2)}</pre>
+          ${detailBlock}
         </div>
       `;
     })
@@ -803,17 +920,17 @@ function renderAuditTimeline(logs) {
   const items = logs.slice(0, 12).map((log) => {
     let badge = "propose";
     if (log.event === "approve") badge = "approve";
-    if (log.event === "execute") badge = "execute";
-    if (log.event === "risk_check" && log.data.status === "rejected") badge = "risk";
+    if (log.event === "execute" || log.event === "approve_execute") badge = "execute";
+    if (log.event === "risk_check" && log.data?.status === "rejected") badge = "risk";
     if (log.event === "config_update") badge = "config";
     if (log.event === "runner_start" || log.event === "runner_stop") badge = "runner";
     return `
       <div class="timeline-item">
         <div>
-          <div><strong>${log.event}</strong></div>
+          <div><strong title="${log.event}">${formatEventLabel(log.event)}</strong></div>
           <div class="label">${formatIso(log.ts)}</div>
         </div>
-        <span class="badge ${badge}">${log.event}</span>
+        <span class="badge ${badge}" title="${log.event}">${formatEventLabel(log.event)}</span>
       </div>
     `;
   });
@@ -828,20 +945,65 @@ function renderMetrics(metrics, targetId = "metrics-grid") {
     return;
   }
   const items = [
-    { label: "総PnL", value: currency.format(metrics.total_pnl || 0) },
-    { label: "総リターン", value: percent.format(metrics.total_return || 0) },
-    { label: "CAGR", value: percent.format(metrics.cagr || 0) },
-    { label: "Sharpe", value: number.format(metrics.sharpe || 0) },
-    { label: "最大DD", value: currency.format(metrics.max_drawdown || 0) },
-    { label: "勝率", value: percent.format(metrics.win_rate || 0) },
-    { label: "Profit Factor", value: number.format(metrics.profit_factor || 0) },
-    { label: "売買回転", value: currency.format(metrics.turnover || 0) },
-    { label: "手数料", value: currency.format(metrics.fees || 0) },
-    { label: "トレード数", value: number.format(metrics.num_trades || 0) },
+    {
+      label: "総損益",
+      title: "期間内の確定損益です",
+      value: currency.format(metrics.total_pnl || 0),
+    },
+    {
+      label: "総リターン",
+      title: "損益 ÷ 運用資本の割合です",
+      value: percent.format(metrics.total_return || 0),
+    },
+    {
+      label: "年平均リターン",
+      title: "CAGR: 年平均の成長率です",
+      value: percent.format(metrics.cagr || 0),
+    },
+    {
+      label: "リスク調整",
+      title: "Sharpe: 収益のぶれを考慮した指標です",
+      value: number.format(metrics.sharpe || 0),
+    },
+    {
+      label: "最大下落幅",
+      title: "最大ドローダウンです",
+      value: currency.format(metrics.max_drawdown || 0),
+    },
+    {
+      label: "勝率",
+      title: "勝ちトレードの割合です",
+      value: percent.format(metrics.win_rate || 0),
+    },
+    {
+      label: "勝ち額÷負け額",
+      title: "Profit Factor: 勝ち額の合計 ÷ 負け額の合計",
+      value: number.format(metrics.profit_factor || 0),
+    },
+    {
+      label: "売買回転",
+      title: "取引金額の合計です",
+      value: currency.format(metrics.turnover || 0),
+    },
+    {
+      label: "手数料",
+      title: "推定手数料の合計です",
+      value: currency.format(metrics.fees || 0),
+    },
+    {
+      label: "トレード数",
+      title: "取引回数です",
+      value: number.format(metrics.num_trades || 0),
+    },
   ];
   grid.innerHTML = items
     .map(
-      (item) => `<div class="metric"><span class="label">${item.label}</span><strong>${item.value}</strong></div>`
+      (item) => `
+        <div class="metric">
+          <span class="label" title="${item.title}">${item.label}</span>
+          <strong>${item.value}</strong>
+        </div>
+      `
     )
     .join("");
 }
@@ -853,9 +1015,9 @@ function renderTrades(trades) {
     const row = document.createElement("tr");
     row.innerHTML = `
       <td>${formatIso(trade.created_at)}</td>
-      <td>${trade.mode}</td>
+      <td>${formatMode(trade.mode)}</td>
       <td>${trade.symbol}</td>
-      <td>${trade.side}</td>
+      <td>${formatSide(trade.side)}</td>
       <td>${number.format(trade.size)}</td>
       <td>${currency.format(trade.price)}</td>
       <td>${currency.format(trade.pnl_jpy)}</td>
@@ -921,9 +1083,9 @@ function renderAnalysisTrades(trades) {
     const row = document.createElement("tr");
     row.innerHTML = `
       <td>${formatIso(trade.created_at)}</td>
-      <td>${trade.mode || "-"}</td>
+      <td>${formatMode(trade.mode)}</td>
       <td>${trade.symbol || "-"}</td>
-      <td>${trade.side || "-"}</td>
+      <td>${formatSide(trade.side)}</td>
       <td>${number.format(trade.size || 0)}</td>
       <td>${currency.format(trade.price || 0)}</td>
       <td>${currency.format(trade.pnl_jpy || 0)}</td>
@@ -975,13 +1137,13 @@ function renderIntentTable(items) {
       <td>${formatIso(item.created_at)}</td>
       <td>${item.intent_id || "-"}</td>
       <td>${item.symbol || "-"}</td>
-      <td>${item.side || "-"}</td>
+      <td>${formatSide(item.side)}</td>
       <td>${currency.format(item.intent_price || 0)}</td>
       <td>${currency.format(item.avg_price || 0)}</td>
       <td>${fillRatio}</td>
       <td>${slippage}</td>
       <td>${item.pnl_jpy === null || item.pnl_jpy === undefined ? "-" : currency.format(item.pnl_jpy)}</td>
-      <td>${item.outcome || "-"}</td>
+      <td>${formatOutcome(item.outcome)}</td>
     `;
     tbody.appendChild(row);
   });
@@ -1052,7 +1214,7 @@ function renderExternalTrades(trades) {
     row.innerHTML = `
       <td>${formatIso(trade.created_at)}</td>
       <td>${trade.symbol || "-"}</td>
-      <td>${trade.side || "-"}</td>
+      <td>${formatSide(trade.side)}</td>
       <td>${number.format(trade.size || 0)}</td>
       <td>${currency.format(trade.price || 0)}</td>
       <td>${currency.format(trade.pnl_jpy || 0)}</td>
@@ -1069,16 +1231,45 @@ function renderBacktestMetrics(metrics) {
     return;
   }
   const items = [
-    { label: "Total PnL", value: currency.format(metrics.total_pnl || 0) },
-    { label: "CAGR", value: percent.format(metrics.cagr || 0) },
-    { label: "Sharpe", value: number.format(metrics.sharpe || 0) },
-    { label: "Max DD", value: currency.format(metrics.max_drawdown || 0) },
-    { label: "Win Rate", value: percent.format(metrics.win_rate || 0) },
-    { label: "Profit Factor", value: number.format(metrics.profit_factor || 0) },
+    {
+      label: "総損益",
+      title: "期間内の確定損益です",
+      value: currency.format(metrics.total_pnl || 0),
+    },
+    {
+      label: "年平均リターン",
+      title: "CAGR: 年平均の成長率です",
+      value: percent.format(metrics.cagr || 0),
+    },
+    {
+      label: "リスク調整",
+      title: "Sharpe: 収益のぶれを考慮した指標です",
+      value: number.format(metrics.sharpe || 0),
+    },
+    {
+      label: "最大下落幅",
+      title: "最大ドローダウンです",
+      value: currency.format(metrics.max_drawdown || 0),
+    },
+    {
+      label: "勝率",
+      title: "勝ちトレードの割合です",
+      value: percent.format(metrics.win_rate || 0),
+    },
+    {
+      label: "勝ち額÷負け額",
+      title: "Profit Factor: 勝ち額の合計 ÷ 負け額の合計",
+      value: number.format(metrics.profit_factor || 0),
+    },
   ];
   grid.innerHTML = items
     .map(
-      (item) => `<div class="metric"><span class="label">${item.label}</span><strong>${item.value}</strong></div>`
+      (item) => `
+        <div class="metric">
+          <span class="label" title="${item.title}">${item.label}</span>
+          <strong>${item.value}</strong>
+        </div>
+      `
     )
     .join("");
 }
@@ -1125,6 +1316,7 @@ function getFilteredBacktestTrades() {
       return (
         String(trade.created_at).toLowerCase().includes(keyword)
         || String(trade.side).toLowerCase().includes(keyword)
+        || String(formatSide(trade.side)).toLowerCase().includes(keyword)
         || String(trade.symbol).toLowerCase().includes(keyword)
         || String(trade.pnl_jpy).toLowerCase().includes(keyword)
       );
@@ -1156,7 +1348,7 @@ function renderBacktestTrades() {
     row.innerHTML = `
       <td>${formatIso(trade.created_at)}</td>
       <td>${trade.symbol || "-"}</td>
-      <td>${trade.side || "-"}</td>
+      <td>${formatSide(trade.side)}</td>
       <td>${number.format(trade.size || 0)}</td>
       <td>${currency.format(trade.price || 0)}</td>
       <td>${currency.format(trade.pnl_jpy || 0)}</td>
@@ -1324,7 +1516,7 @@ function renderNewsList(items) {
           <a href="${item.url}" target="_blank" rel="noreferrer">${item.title}</a>
           <div class="news-meta">
             <span>${item.source}</span>
-            <span class="sentiment-pill ${cls}">${sentiment.toFixed(2)}</span>
+            <span class="sentiment-pill ${cls}" title="ニュースの雰囲気（プラスは明るい、マイナスは暗い）">${sentiment.toFixed(2)}</span>
           </div>
         </div>
       `;
@@ -1818,7 +2010,7 @@ async function handlePropose(event) {
       body: JSON.stringify(payload),
     });
     if (data.status && data.status !== "proposed") {
-      setOutput(output, "提案なし", [`理由: ${data.reason}`], data, "error");
+      setOutput(output, "提案なし", [`理由: ${formatRiskReason(data.reason)}`], data, "error");
       return;
     }
     setOutput(
@@ -1826,9 +2018,9 @@ async function handlePropose(event) {
       "提案作成済み",
       [
         `Intent: ${data.intent_id}`,
-        `Side: ${data.side} / Size: ${number.format(data.size)}`,
-        `Price: ${currency.format(data.price)}`,
-        `Confidence: ${percent.format(data.confidence)}`,
+        `方向: ${formatSide(data.side)} / 数量: ${number.format(data.size)}`,
+        `価格: ${currency.format(data.price)}`,
+        `確信度: ${percent.format(data.confidence)}`,
       ],
       data,
       "ok"
@@ -1868,7 +2060,7 @@ async function handleApprove(event) {
         "承認して実行",
         [
           `Intent: ${data.approval.intent_id}`,
-          `Execution: ${data.execution.status} (${data.execution.message})`,
+          `Execution: ${formatIntentStatus(data.execution.status)} (${formatRiskReason(data.execution.message || "")})`,
         ],
         data,
         data.execution.status === "filled" ? "ok" : "info"
@@ -1907,7 +2099,14 @@ async function handleExecute(event) {
       method: "POST",
       body: JSON.stringify(payload),
     });
-    setOutput(output, "実行結果", [`${data.status}: ${data.message}`], data, data.status === "filled" ? "ok" : "info");
+    const statusLabel = formatIntentStatus(data.status);
+    setOutput(
+      output,
+      "実行結果",
+      [`${statusLabel}: ${formatRiskReason(data.message || "")}`],
+      data,
+      data.status === "filled" ? "ok" : "info"
+    );
     await loadPosition();
     await loadPortfolio();
     await loadAnalytics($("report-mode").value);
@@ -2128,7 +2327,7 @@ async function init() {
       try {
         await startRunner();
       } catch (err) {
-        alert(`Runner起動に失敗: ${err.message}`);
+        alert(`自動取り込みの起動に失敗: ${err.message}`);
       }
     });
   }
@@ -2138,7 +2337,7 @@ async function init() {
       try {
         await stopRunner();
       } catch (err) {
-        alert(`Runner停止に失敗: ${err.message}`);
+        alert(`自動取り込みの停止に失敗: ${err.message}`);
       }
     });
   }

@@ -4,8 +4,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>News-aware Crypto Agent</title>
-    <link rel="stylesheet" href="/static/styles.css?v=2" />
-    <script defer src="/static/app.js?v=2"></script>
+    <link rel="stylesheet" href="/static/styles.css?v=3" />
+    <script defer src="/static/app.js?v=3"></script>
   </head>
   <body>
     <div class="bg">
@@ -21,18 +21,39 @@
           <span class="brand-text">News-aware Crypto Agent</span>
         </div>
         <nav class="hero-nav">
-          <a href="#overview">概要</a>
-          <a href="#watchlist">ウォッチ</a>
-          <a href="#portfolio">ポートフォリオ</a>
-          <a href="#ingest">取り込み</a>
-          <a href="#plan">提案</a>
-          <a href="#approval">承認</a>
-          <a href="#execute">実行</a>
-          <a href="#report">レポート</a>
-          <a href="#analysis">分析</a>
-          <a href="#backtest">バックテスト</a>
-          <a href="#news">ニュース</a>
-          <a href="#audit">監査</a>
+          <details class="nav-group">
+            <summary>📊 見る</summary>
+            <div class="nav-links">
+              <a href="#overview">概要</a>
+              <a href="#watchlist">ウォッチ</a>
+              <a href="#portfolio">ポートフォリオ</a>
+            </div>
+          </details>
+          <details class="nav-group">
+            <summary>💹 取引</summary>
+            <div class="nav-links">
+              <a href="#ingest">取り込み</a>
+              <a href="#plan">提案</a>
+              <a href="#approval">承認</a>
+              <a href="#execute">実行</a>
+            </div>
+          </details>
+          <details class="nav-group">
+            <summary>📈 分析</summary>
+            <div class="nav-links">
+              <a href="#report">レポート</a>
+              <a href="#analysis">分析</a>
+              <a href="#backtest">バックテスト</a>
+              <a href="#news">ニュース</a>
+              <a href="#audit">監査</a>
+            </div>
+          </details>
+          <details class="nav-group">
+            <summary>⚙️ 設定</summary>
+            <div class="nav-links">
+              <a href="#guide">取引所ガイド</a>
+            </div>
+          </details>
         </nav>
       </div>
       <div class="hero-body">
@@ -57,29 +78,29 @@
             <div class="panel-title">安全モード</div>
             <div class="panel-grid">
               <div>
-                <span class="label">モード</span>
+                <span class="label" title="練習モードは実際のお金を使いません">運用モード</span>
                 <strong id="cfg-mode">-</strong>
               </div>
               <div>
-                <span class="label">承認</span>
+                <span class="label" title="取引実行前に人の確認が必要です">承認必須</span>
                 <strong id="cfg-approval">-</strong>
               </div>
               <div>
-                <span class="label">自動執行</span>
+                <span class="label" title="条件を満たすと自動で実行します">自動実行</span>
                 <strong id="cfg-autopilot">-</strong>
               </div>
               <div>
-                <span class="label">Kill Switch</span>
+                <span class="label" title="すべての取引を緊急停止します">緊急停止</span>
                 <strong id="cfg-kill">-</strong>
               </div>
             </div>
             <div class="panel-foot">
               <div>
-                <span class="label">日次損失上限</span>
+                <span class="label" title="1日の損失がこの金額に達すると取引を止めます">日次損失上限</span>
                 <strong id="cfg-daily-loss">-</strong>
               </div>
               <div>
-                <span class="label">最大注文/日</span>
+                <span class="label" title="1日に実行できる注文の上限です">最大注文/日</span>
                 <strong id="cfg-max-orders">-</strong>
               </div>
             </div>
@@ -108,11 +129,11 @@
                 <strong id="pos-current">-</strong>
               </div>
               <div>
-                <span class="label">未実現PnL</span>
+                <span class="label" title="今すぐ売った場合の損益目安です">含み損益</span>
                 <strong id="pos-unrealized">-</strong>
               </div>
               <div>
-                <span class="label">損益率</span>
+                <span class="label" title="平均価格に対する現在価格の変化率です">損益率</span>
                 <strong id="pos-return">-</strong>
               </div>
               <div>
@@ -126,14 +147,14 @@
             </div>
             <div class="panel-foot">
               <div class="compare">
-                <span class="label">Avg vs Now</span>
+                <span class="label" title="平均価格と現在価格の比較です">平均 vs 現在</span>
                 <div class="compare-bar">
                   <div class="compare-fill" id="pos-compare"></div>
                 </div>
               </div>
               <div class="gauge">
                 <canvas id="risk-gauge" height="90"></canvas>
-                <span class="label">エクスポージャー</span>
+                <span class="label" title="資本に対する持ち高の割合です">エクスポージャー</span>
                 <strong id="pos-exposure">-</strong>
               </div>
             </div>
@@ -165,20 +186,25 @@
             <span class="label">足種</span>
             <strong id="cfg-timeframes">-</strong>
           </div>
-          <div class="stat">
-            <span class="label">承認フレーズ</span>
+              <div class="stat">
+            <span class="label" title="承認時に使うフレーズです。安全のため非表示です">承認フレーズ</span>
             <div class="inline">
               <strong id="cfg-phrase">非表示</strong>
-              <button class="link" id="show-phrase">表示</button>
+              <button class="link" id="show-phrase" title="開発者向けの確認用に表示します">表示（開発者向け）</button>
             </div>
           </div>
+        </div>
+        <div class="callout">
+          <strong>初めての流れ</strong>
+          <div class="callout-steps">取り込み → 提案 → 承認 → 実行</div>
+          <div class="label">まずは練習モードで確認してください。</div>
         </div>
         <div class="divider"></div>
         <div class="mini-list" id="intents-preview"></div>
         <div class="divider"></div>
         <div class="runner-card" id="runner-card">
           <div class="runner-head">
-            <strong>リアルタイムランナー</strong>
+            <strong>自動取り込み・提案</strong>
             <span class="label" id="runner-state">未起動</span>
           </div>
           <div class="runner-light">
@@ -201,9 +227,11 @@
           <div class="runner-actions">
             <button class="btn btn-ghost" id="open-frequency-modal">更新頻度を編集</button>
           </div>
-          <div class="runner-hint">
-            起動: <code>uv run trade-agent run --strategy news_overlay</code>
-          </div>
+          <div class="panel-subtle">実行は自動化されません（承認が必要です）。</div>
+          <details class="runner-hint">
+            <summary>開発者向け情報を表示</summary>
+            <code>uv run trade-agent run --strategy news_overlay</code>
+          </details>
         </div>
       </section>
 
@@ -227,7 +255,7 @@
                   <tr>
                     <th>シンボル</th>
                     <th>現在価格</th>
-                    <th>変動率</th>
+                    <th title="直近価格の変化率です">変動率</th>
                     <th>更新</th>
                   </tr>
                 </thead>
@@ -266,7 +294,7 @@
             <strong id="portfolio-total">-</strong>
           </div>
           <div class="summary-card">
-            <span class="label">合計未実現PnL</span>
+            <span class="label" title="今すぐ売った場合の損益目安です">合計含み損益</span>
             <strong id="portfolio-pnl">-</strong>
           </div>
         </div>
@@ -283,7 +311,7 @@
                 <th>平均価格</th>
                 <th>現在価格</th>
                 <th>評価額</th>
-                <th>未実現PnL</th>
+                <th title="今すぐ売った場合の損益目安です">含み損益</th>
                 <th>配分</th>
               </tr>
             </thead>
@@ -294,7 +322,7 @@
 
       <section class="card" id="ingest" data-step="3">
         <div class="card-head">
-          <h2>3. データ取り込み</h2>
+          <h2>データ取り込み</h2>
           <p>市場価格とニュースを最新化します。</p>
         </div>
         <form id="ingest-form" class="form">
@@ -323,7 +351,7 @@
 
       <section class="card" id="plan" data-step="4">
         <div class="card-head">
-          <h2>4. 取引提案</h2>
+          <h2>取引提案</h2>
           <p>戦略からトレードプランを生成します。</p>
         </div>
         <form id="propose-form" class="form">
@@ -336,10 +364,10 @@
               </select>
             </label>
             <label>
-              <span>モード</span>
+              <span title="練習モードは実際のお金を使いません">モード</span>
               <select id="propose-mode">
-                <option value="paper">ペーパー</option>
-                <option value="live">ライブ</option>
+                <option value="paper">練習モード</option>
+                <option value="live">本番モード</option>
               </select>
             </label>
             <label>
@@ -358,7 +386,7 @@
 
       <section class="card" id="approval" data-step="5">
         <div class="card-head">
-          <h2>5. 承認</h2>
+          <h2>承認</h2>
           <p>提案された取引を確認し、承認フレーズで許可します。</p>
         </div>
         <div class="table-wrap">
@@ -379,7 +407,7 @@
         <form id="approve-form" class="form">
           <div class="form-grid">
             <label>
-              <span>Intent ID</span>
+              <span title="提案を識別するIDです">提案ID</span>
               <input type="text" id="approve-intent" placeholder="最新の提案IDを入力" />
             </label>
             <div class="note">
@@ -389,8 +417,8 @@
             <label>
               <span>実行モード</span>
               <select id="approve-execute-mode">
-                <option value="paper">ペーパー</option>
-                <option value="live">ライブ</option>
+                <option value="paper">練習モード</option>
+                <option value="live">本番モード</option>
               </select>
             </label>
           </div>
@@ -404,20 +432,20 @@
 
       <section class="card" id="execute" data-step="6">
         <div class="card-head">
-          <h2>6. 実行</h2>
-          <p>承認済みの取引を実行します（デフォルトはペーパー）。</p>
+          <h2>実行</h2>
+          <p>承認済みの取引を実行します（デフォルトは練習モード）。</p>
         </div>
         <form id="execute-form" class="form">
           <div class="form-grid">
             <label>
-              <span>Intent ID（任意）</span>
+              <span title="未入力なら最新の提案を実行します">提案ID（任意）</span>
               <input type="text" id="execute-intent" placeholder="未入力なら最新" />
             </label>
             <label>
               <span>モード</span>
               <select id="execute-mode">
-                <option value="paper">ペーパー</option>
-                <option value="live">ライブ</option>
+                <option value="paper">練習モード</option>
+                <option value="live">本番モード</option>
               </select>
             </label>
           </div>
@@ -428,7 +456,7 @@
 
       <section class="card" id="report" data-step="7">
         <div class="card-head">
-          <h2>7. レポート & PnL</h2>
+          <h2>レポートと損益</h2>
           <p>成績の推移を視覚的に確認します。</p>
         </div>
         <form id="report-form" class="form">
@@ -437,8 +465,8 @@
               <span>対象モード</span>
               <select id="report-mode">
                 <option value="">すべて</option>
-                <option value="paper">ペーパー</option>
-                <option value="live">ライブ</option>
+                <option value="paper">練習モード</option>
+                <option value="live">本番モード</option>
               </select>
             </label>
           </div>
@@ -462,7 +490,7 @@
                 <th>方向</th>
                 <th>サイズ</th>
                 <th>価格</th>
-                <th>PnL</th>
+                <th title="この取引の損失/利益です">損益</th>
               </tr>
             </thead>
             <tbody></tbody>
@@ -489,8 +517,8 @@
               <span>対象モード</span>
               <select id="analysis-mode">
                 <option value="">すべて</option>
-                <option value="paper">ペーパー</option>
-                <option value="live">ライブ</option>
+                <option value="paper">練習モード</option>
+                <option value="live">本番モード</option>
               </select>
             </label>
             <label>
@@ -519,8 +547,8 @@
             <thead>
               <tr>
                 <th>日付</th>
-                <th>日次PnL</th>
-                <th>累積</th>
+                <th title="1日ごとの損失/利益です">日次損益</th>
+                <th title="累積の損失/利益です">累積</th>
               </tr>
             </thead>
             <tbody></tbody>
@@ -538,7 +566,7 @@
                 <th>方向</th>
                 <th>サイズ</th>
                 <th>価格</th>
-                <th>PnL</th>
+                <th title="この取引の損失/利益です">損益</th>
                 <th>戦略</th>
               </tr>
             </thead>
@@ -553,14 +581,14 @@
             <thead>
               <tr>
                 <th>日時</th>
-                <th>Intent ID</th>
+                <th>提案ID</th>
                 <th>シンボル</th>
                 <th>方向</th>
-                <th>意図価格</th>
-                <th>約定価格</th>
-                <th>充足率</th>
-                <th>スリッページ</th>
-                <th>PnL</th>
+                <th title="提案時に想定した価格です">意図価格</th>
+                <th title="実際に約定した価格です">約定価格</th>
+                <th title="意図数量に対する約定率です">充足率</th>
+                <th title="意図価格と約定価格の差です">スリッページ</th>
+                <th title="この取引の損失/利益です">損益</th>
                 <th>結果</th>
               </tr>
             </thead>
@@ -604,7 +632,7 @@
                     <th>方向</th>
                     <th>サイズ</th>
                     <th>価格</th>
-                    <th>PnL</th>
+                    <th title="この取引の損失/利益です">損益</th>
                   </tr>
                 </thead>
                 <tbody></tbody>
@@ -656,17 +684,17 @@
         <div class="heatmap-card">
           <div class="heatmap-head">
             <strong>月別リターン</strong>
-            <span class="label">色が濃いほどPnLが大きい</span>
+            <span class="label">色が濃いほど損益が大きい</span>
           </div>
           <div class="heatmap" id="backtest-heatmap"></div>
         </div>
         <div class="table-tools">
-          <input type="search" id="backtest-filter" placeholder="フィルタ: side, pnl, 日付" />
+          <input type="search" id="backtest-filter" placeholder="フィルタ: 方向, 損益, 日付" />
           <select id="backtest-sort">
             <option value="date_desc">新しい順</option>
             <option value="date_asc">古い順</option>
-            <option value="pnl_desc">PnL 大きい順</option>
-            <option value="pnl_asc">PnL 小さい順</option>
+            <option value="pnl_desc">損益 大きい順</option>
+            <option value="pnl_asc">損益 小さい順</option>
           </select>
         </div>
         <div class="table-wrap">
@@ -678,7 +706,7 @@
                 <th>方向</th>
                 <th>サイズ</th>
                 <th>価格</th>
-                <th>PnL</th>
+                <th title="この取引の損失/利益です">損益</th>
               </tr>
             </thead>
             <tbody></tbody>
@@ -688,7 +716,7 @@
 
       <section class="card" id="news" data-step="10">
         <div class="card-head">
-          <h2>News Insights</h2>
+          <h2>ニュース分析</h2>
           <p>ニュースセンチメントとキーワードを可視化します。</p>
         </div>
         <div class="news-grid">
@@ -697,11 +725,11 @@
             <div class="news-list" id="news-list"></div>
           </div>
           <div class="news-panel">
-            <h3>センチメント推移（24h）</h3>
+            <h3 title="ニュースがポジティブ/ネガティブかの目安です">センチメント推移（24h）</h3>
             <canvas id="news-sentiment-chart" height="160"></canvas>
           </div>
           <div class="news-panel">
-            <h3>キーワードクラウド</h3>
+            <h3 title="検出されたキーワードが多いほど大きく表示されます">キーワードクラウド</h3>
             <div class="tag-cloud" id="news-keywords"></div>
           </div>
         </div>
@@ -710,24 +738,24 @@
       <section class="card" id="audit" data-step="11">
         <div class="card-head">
           <h2>監査ログ</h2>
-          <p>risk_check など重要な判断理由を分析できます。</p>
+          <p>リスク確認など重要な判断理由を分析できます。</p>
         </div>
         <div class="audit-summary" id="audit-summary"></div>
         <div class="audit-controls">
           <label>
             <span>イベント種別</span>
             <div class="chip-group" id="audit-event-chips">
-              <label class="chip"><input type="checkbox" value="risk_check" checked />risk_check</label>
-              <label class="chip"><input type="checkbox" value="propose" checked />propose</label>
-              <label class="chip"><input type="checkbox" value="approve" checked />approve</label>
-              <label class="chip"><input type="checkbox" value="approve_execute" checked />approve_execute</label>
-              <label class="chip"><input type="checkbox" value="execute" checked />execute</label>
-              <label class="chip"><input type="checkbox" value="ingest" />ingest</label>
-              <label class="chip"><input type="checkbox" value="backtest" />backtest</label>
-              <label class="chip"><input type="checkbox" value="report" />report</label>
-              <label class="chip"><input type="checkbox" value="config_update" />config_update</label>
-              <label class="chip"><input type="checkbox" value="runner_start" />runner_start</label>
-              <label class="chip"><input type="checkbox" value="runner_stop" />runner_stop</label>
+              <label class="chip"><input type="checkbox" value="risk_check" checked />リスク確認</label>
+              <label class="chip"><input type="checkbox" value="propose" checked />提案</label>
+              <label class="chip"><input type="checkbox" value="approve" checked />承認</label>
+              <label class="chip"><input type="checkbox" value="approve_execute" checked />承認+実行</label>
+              <label class="chip"><input type="checkbox" value="execute" checked />実行</label>
+              <label class="chip"><input type="checkbox" value="ingest" />取り込み</label>
+              <label class="chip"><input type="checkbox" value="backtest" />バックテスト</label>
+              <label class="chip"><input type="checkbox" value="report" />レポート</label>
+              <label class="chip"><input type="checkbox" value="config_update" />設定変更</label>
+              <label class="chip"><input type="checkbox" value="runner_start" />自動取り込み開始</label>
+              <label class="chip"><input type="checkbox" value="runner_stop" />自動取り込み停止</label>
             </div>
           </label>
           <label>
@@ -739,8 +767,8 @@
             <input type="date" id="audit-end" />
           </label>
           <label>
-            <span>Intent ID</span>
-            <input type="text" id="audit-intent" placeholder="intent_id で絞り込み" />
+            <span>提案ID</span>
+            <input type="text" id="audit-intent" placeholder="提案IDで絞り込み" />
           </label>
           <div class="form-actions">
             <button class="btn btn-ghost" id="refresh-audit">更新</button>
@@ -824,14 +852,14 @@
         <form id="safety-form" class="form">
           <div class="form-grid">
             <label>
-              <span>モード</span>
+              <span title="練習モードは実際のお金を使いません">運用モード</span>
               <select id="safety-mode">
-                <option value="paper">ペーパー</option>
-                <option value="live">ライブ</option>
+                <option value="paper">練習モード</option>
+                <option value="live">本番モード</option>
               </select>
             </label>
             <label>
-              <span>ドライラン</span>
+              <span title="実際の注文を出さずにシミュレーションします">練習モード設定</span>
               <select id="safety-dry-run">
                 <option value="true">有効</option>
                 <option value="false">無効</option>
@@ -839,39 +867,39 @@
             </label>
             <label class="checkbox">
               <input type="checkbox" id="safety-require-approval" />
-              <span>承認を必須にする</span>
+              <span title="実行前に人の確認が必要です">承認を必須にする</span>
             </label>
             <label class="checkbox">
               <input type="checkbox" id="safety-kill-switch" />
-              <span>Kill Switch を有効</span>
+              <span title="すべての取引を緊急停止します">緊急停止を有効</span>
             </label>
             <label class="checkbox">
               <input type="checkbox" id="safety-autopilot" />
-              <span>自動執行（Autopilot）</span>
+              <span title="条件を満たすと自動で実行します（既定はOFF）">自動実行（条件付き）</span>
             </label>
             <label class="checkbox">
               <input type="checkbox" id="safety-live-ack" />
-              <span>ライブ取引の理解フラグ</span>
+              <span title="本番モードでの実行に必要な確認です">本番取引の確認</span>
             </label>
             <label>
-              <span>クールダウン（分）</span>
+              <span title="連続取引を抑えるための待機時間です">クールダウン（分）</span>
               <input type="number" id="safety-cooldown-minutes" min="0" step="1" />
             </label>
             <label>
-              <span>急変時の解除閾値（%）</span>
+              <span title="急変時のみクールダウンを解除する閾値です">急変時の解除閾値（%）</span>
               <input type="number" id="safety-cooldown-bypass" min="0" step="0.1" />
             </label>
             <label>
-              <span>日次損失上限（JPY）</span>
+              <span title="1日の損失がこの金額に達すると取引停止します">日次損失上限（JPY）</span>
               <input type="number" id="safety-daily-loss" min="0" step="1000" />
             </label>
             <label>
-              <span>最大注文数/日</span>
+              <span title="1日に実行できる注文の上限です">最大注文数/日</span>
               <input type="number" id="safety-max-orders" min="0" step="1" />
             </label>
           </div>
           <div class="hint">
-            ライブ取引は <code>I_UNDERSTAND_LIVE_TRADING=true</code> と
+            本番取引は <code>I_UNDERSTAND_LIVE_TRADING=true</code> と
             ここでのフラグ両方が必要です。
           </div>
           <div class="modal-actions">
@@ -912,12 +940,12 @@
               <input type="number" id="ui-refresh-poll" min="5" step="1" />
             </label>
             <label>
-              <span>Intent更新（秒）</span>
+              <span>提案更新（秒）</span>
               <input type="number" id="ui-intent-poll" min="5" step="1" />
             </label>
           </div>
           <div class="hint">
-            Runnerの反映は再起動が必要です。UI更新は即時反映されます。
+            自動取り込みの反映は再起動が必要です。UI更新は即時反映されます。
           </div>
           <div class="modal-actions">
             <button class="btn btn-ghost" type="button" data-close="true">キャンセル</button>
@@ -928,7 +956,7 @@
     </div>
 
     <footer class="footer">
-      <p>このUIはローカルで動作します。実運用の前に必ずペーパー検証を行ってください。</p>
+      <p>このUIはローカルで動作します。実運用の前に必ず練習モードで検証してください。</p>
     </footer>
   </body>
 </html>

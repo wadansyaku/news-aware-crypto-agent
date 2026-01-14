@@ -27,11 +27,18 @@ def generate_plan(
     momentum = current - closes[-1 - config.momentum_lookback]
 
     base_notional = risk.capital_jpy * config.base_position_pct
-    size = base_notional / current if current > 0 else 0.0
-    confidence = 0.55
+    sma_diff_pct = (current - sma_value) / sma_value if sma_value else 0.0
+    momentum_pct = momentum / current if current else 0.0
+    strength = min(1.0, (abs(sma_diff_pct) + abs(momentum_pct)) * 3.0)
+    confidence = 0.5 + 0.4 * strength
+    size_multiplier = 0.5 + 1.0 * strength
+    size = (base_notional * size_multiplier) / current if current > 0 else 0.0
 
     if current > sma_value and momentum > 0:
-        rationale = f"price>{sma_value:.2f}, momentum={momentum:.2f}"
+        rationale = (
+            f"price>{sma_value:.2f}, momentum={momentum:.2f}, "
+            f"strength={strength:.2f}, conf={confidence:.2f}"
+        )
         return TradePlan(
             symbol=symbol,
             side="buy",
@@ -43,7 +50,10 @@ def generate_plan(
         )
 
     if current < sma_value and momentum < 0:
-        rationale = f"price<{sma_value:.2f}, momentum={momentum:.2f}"
+        rationale = (
+            f"price<{sma_value:.2f}, momentum={momentum:.2f}, "
+            f"strength={strength:.2f}, conf={confidence:.2f}"
+        )
         return TradePlan(
             symbol=symbol,
             side="sell",

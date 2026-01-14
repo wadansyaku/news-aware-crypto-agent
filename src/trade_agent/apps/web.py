@@ -494,6 +494,58 @@ def _runner_state_running(settings) -> bool:
     return (datetime.now(timezone.utc) - updated_at).total_seconds() <= max_interval * 3
 
 
+def _start_runner_thread(settings, strategy: str, mode: str) -> None:
+    global _RUNNER_THREAD, _RUNNER_INSTANCE
+
+    def _run() -> None:
+        global _RUNNER_INSTANCE
+        store = context.open_store(settings)
+        runner = Runner(
+            settings,
+            store,
+            propose_params=propose.ProposeParams(
+                strategy=strategy,
+                mode=mode,
+                refresh=False,
+            ),
+        )
+        with _RUNNER_LOCK:
+            _RUNNER_INSTANCE = runner
+        try:
+            runner.run()
+        finally:
+            store.close()
+
+    thread = threading.Thread(target=_run, daemon=True)
+    _RUNNER_THREAD = thread
+    thread.start()
+
+
+def _log_runner_start(settings, strategy: str, mode: str, source: str = "api") -> None:
+    store = context.open_store(settings)
+    try:
+        store.log_event(
+            "runner_start",
+            {"strategy": strategy, "mode": mode, "source": source},
+        )
+    finally:
+        store.close()
+
+
+@app.on_event("startup")
+async def auto_start_runner() -> None:
+    settings = _load_settings()
+    if not settings.runner.enabled:
+        return
+    with _RUNNER_LOCK:
+        if _runner_running() or _runner_state_running(settings):
+            return
+        strategy = "news_overlay" if settings.news.rss_urls else "baseline"
+        mode = settings.trading.mode if settings.trading.mode in {"paper", "live"} else "paper"
+        _start_runner_thread(settings, strategy, mode)
+    _log_runner_start(settings, strategy, mode, source="autostart")
+
+
 @app.post("/api/runner/start")
 async def runner_start_api(payload: RunnerStartRequest) -> dict:
     global _RUNNER_THREAD, _RUNNER_INSTANCE
@@ -508,39 +560,9 @@ async def runner_start_api(payload: RunnerStartRequest) -> dict:
             raise HTTPException(status_code=400, detail="invalid strategy")
         if payload.mode not in {"paper", "live"}:
             raise HTTPException(status_code=400, detail="invalid mode")
+        _start_runner_thread(settings, payload.strategy, payload.mode)
 
-        def _run() -> None:
-            global _RUNNER_INSTANCE
-            store = context.open_store(settings)
-            runner = Runner(
-                settings,
-                store,
-                propose_params=propose.ProposeParams(
-                    strategy=payload.strategy,
-                    mode=payload.mode,
-                    refresh=False,
-                ),
-            )
-            with _RUNNER_LOCK:
-                _RUNNER_INSTANCE = runner
-            try:
-                runner.run()
-            finally:
-                store.close()
-
-        thread = threading.Thread(target=_run, daemon=True)
-        _RUNNER_THREAD = thread
-        thread.start()
-
-    settings = _load_settings()
-    store = context.open_store(settings)
-    try:
-        store.log_event(
-            "runner_start",
-            {"strategy": payload.strategy, "mode": payload.mode},
-        )
-    finally:
-        store.close()
+    _log_runner_start(settings, payload.strategy, payload.mode, source="api")
     return {"status": "started"}
 
 
@@ -834,8 +856,20 @@ async def position_close_api(payload: ClosePositionRequest) -> dict:
 
 
 def main() -> None:
+    import os
+    import threading
+    import time
+    import webbrowser
+
     import uvicorn
 
+    def _open_browser() -> None:
+        if os.environ.get("TRADE_AGENT_NO_BROWSER") == "1" or os.environ.get("CI"):
+            return
+        time.sleep(1.0)
+        webbrowser.open("http://127.0.0.1:8000", new=1, autoraise=True)
+
+    threading.Thread(target=_open_browser, daemon=True).start()
     uvicorn.run("trade_agent.apps.web:app", host="127.0.0.1", port=8000, reload=False)
 
 
