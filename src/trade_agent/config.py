@@ -280,6 +280,18 @@ def _get(config: dict[str, Any], *keys: str, default: Any) -> Any:
     return default if node is None else node
 
 
+def load_raw_config(path: str) -> dict[str, Any]:
+    if not Path(path).exists():
+        return {}
+    with open(path, "r", encoding="utf-8") as handle:
+        return yaml.safe_load(handle) or {}
+
+
+def save_raw_config(path: str, data: dict[str, Any]) -> None:
+    with open(path, "w", encoding="utf-8") as handle:
+        yaml.safe_dump(data, handle, sort_keys=False, allow_unicode=False)
+
+
 def load_config(path: str) -> AppSettings:
     load_dotenv(override=False)
     with open(path, "r", encoding="utf-8") as handle:

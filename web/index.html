@@ -76,6 +76,9 @@
               <span class="label">日次損失上限</span>
               <strong id="cfg-daily-loss">-</strong>
             </div>
+            <div class="panel-actions">
+              <button class="btn btn-ghost" id="open-safety-modal">安全設定を編集</button>
+            </div>
           </div>
           <div class="panel-card">
             <div class="panel-title">現在ポジション</div>
@@ -164,6 +167,21 @@
         </div>
         <div class="divider"></div>
         <div class="mini-list" id="intents-preview"></div>
+        <div class="divider"></div>
+        <div class="runner-card" id="runner-card">
+          <div class="runner-head">
+            <strong>リアルタイムランナー</strong>
+            <span class="label" id="runner-state">未起動</span>
+          </div>
+          <div class="runner-meta">
+            <span>市場: <span id="runner-market-at">-</span></span>
+            <span>ニュース: <span id="runner-news-at">-</span></span>
+            <span>提案: <span id="runner-propose-at">-</span></span>
+          </div>
+          <div class="runner-hint">
+            起動: <code>uv run trade-agent run --strategy news_overlay</code>
+          </div>
+        </div>
       </section>
 
       <section class="card" id="watchlist" data-step="1">
@@ -341,10 +359,10 @@
               <span>Intent ID</span>
               <input type="text" id="approve-intent" placeholder="最新の提案IDを入力" />
             </label>
-            <label>
-              <span>承認フレーズ</span>
-              <input type="password" id="approve-phrase" placeholder="I APPROVE" />
-            </label>
+            <div class="note">
+              <span class="label">承認フレーズ</span>
+              <div>保存済みのフレーズを自動で使用します。</div>
+            </div>
             <label>
               <span>実行モード</span>
               <select id="approve-execute-mode">
@@ -620,6 +638,58 @@
           <div class="modal-actions">
             <button class="btn btn-ghost" type="button" data-close="true">キャンセル</button>
             <button class="btn btn-primary" type="submit">追加する</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="modal" id="safety-modal" aria-hidden="true">
+      <div class="modal-backdrop" data-close="true"></div>
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="safety-modal-title">
+        <div class="modal-head">
+          <h3 id="safety-modal-title">安全モード設定</h3>
+          <button class="icon-button" type="button" data-close="true">×</button>
+        </div>
+        <form id="safety-form" class="form">
+          <div class="form-grid">
+            <label>
+              <span>モード</span>
+              <select id="safety-mode">
+                <option value="paper">ペーパー</option>
+                <option value="live">ライブ</option>
+              </select>
+            </label>
+            <label>
+              <span>ドライラン</span>
+              <select id="safety-dry-run">
+                <option value="true">有効</option>
+                <option value="false">無効</option>
+              </select>
+            </label>
+            <label class="checkbox">
+              <input type="checkbox" id="safety-require-approval" />
+              <span>承認を必須にする</span>
+            </label>
+            <label class="checkbox">
+              <input type="checkbox" id="safety-kill-switch" />
+              <span>Kill Switch を有効</span>
+            </label>
+            <label class="checkbox">
+              <input type="checkbox" id="safety-autopilot" />
+              <span>自動執行（Autopilot）</span>
+            </label>
+            <label class="checkbox">
+              <input type="checkbox" id="safety-live-ack" />
+              <span>ライブ取引の理解フラグ</span>
+            </label>
+          </div>
+          <div class="hint">
+            ライブ取引は <code>I_UNDERSTAND_LIVE_TRADING=true</code> と
+            ここでのフラグ両方が必要です。
+          </div>
+          <div class="modal-actions">
+            <button class="btn btn-ghost" type="button" data-close="true">キャンセル</button>
+            <button class="btn btn-primary" type="submit">保存する</button>
           </div>
         </form>
       </div>

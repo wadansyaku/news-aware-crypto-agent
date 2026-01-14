@@ -26,6 +26,7 @@ const state = {
   watchlist: [],
   alerts: [],
   portfolio: null,
+  runner: null,
 };
 
 function formatIso(value) {
@@ -152,6 +153,75 @@ function closeAlertModal() {
   if (!modal) return;
   modal.classList.remove("show");
   modal.setAttribute("aria-hidden", "true");
+}
+
+function openSafetyModal() {
+  const modal = $("safety-modal");
+  if (!modal) return;
+  const cfg = state.config || {};
+  $("safety-mode").value = cfg.mode || "paper";
+  $("safety-dry-run").value = String(cfg.dry_run ?? true);
+  $("safety-require-approval").checked = Boolean(cfg.require_approval);
+  $("safety-kill-switch").checked = Boolean(cfg.kill_switch);
+  $("safety-autopilot").checked = Boolean(cfg.autopilot_enabled);
+  $("safety-live-ack").checked = Boolean(cfg.i_understand_live_trading);
+  modal.classList.add("show");
+  modal.setAttribute("aria-hidden", "false");
+}
+
+function closeSafetyModal() {
+  const modal = $("safety-modal");
+  if (!modal) return;
+  modal.classList.remove("show");
+  modal.setAttribute("aria-hidden", "true");
+}
+
+async function handleSafetySubmit(event) {
+  event.preventDefault();
+  const payload = {
+    mode: $("safety-mode").value,
+    dry_run: $("safety-dry-run").value === "true",
+    require_approval: $("safety-require-approval").checked,
+    kill_switch: $("safety-kill-switch").checked,
+    autopilot_enabled: $("safety-autopilot").checked,
+    i_understand_live_trading: $("safety-live-ack").checked,
+  };
+  try {
+    await apiRequest("/api/config/safety", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    await loadStatus();
+    closeSafetyModal();
+  } catch (err) {
+    alert(`安全設定の保存に失敗: ${err.message}`);
+  }
+}
+
+function renderRunnerState(data) {
+  const stateNode = $("runner-state");
+  const marketNode = $("runner-market-at");
+  const newsNode = $("runner-news-at");
+  const proposeNode = $("runner-propose-at");
+  if (!stateNode || !marketNode || !newsNode || !proposeNode) return;
+  if (!data || !data.exists) {
+    stateNode.textContent = "未起動";
+    marketNode.textContent = "-";
+    newsNode.textContent = "-";
+    proposeNode.textContent = "-";
+    return;
+  }
+  stateNode.textContent = data.running ? "稼働中" : "停止中";
+  const state = data.state || {};
+  marketNode.textContent = formatIso(state.last_success_ingest_market_at);
+  newsNode.textContent = formatIso(state.last_success_ingest_news_at);
+  proposeNode.textContent = formatIso(state.last_success_propose_at);
+}
+
+async function loadRunnerState() {
+  const data = await apiRequest("/api/runner/state");
+  state.runner = data;
+  renderRunnerState(data);
 }
 
 function drawGauge(canvasId, value) {
@@ -1220,7 +1290,9 @@ async function handleApprove(event) {
   const action = event.submitter?.dataset.action || "approve";
   try {
     const intentId = $("approve-intent").value.trim();
-    const phrase = $("approve-phrase").value.trim();
+    const phraseInput = $("approve-phrase");
+    let phrase = phraseInput ? phraseInput.value.trim() : "";
+    if (!phrase) phrase = state.config?.approval_phrase || "";
     if (action === "approve-execute") {
       const payload = {
         intent_id: intentId,
@@ -1377,6 +1449,12 @@ async function init() {
     if (output) output.textContent = `ウォッチリスト取得失敗: ${err.message}`;
   }
   try {
+    await loadRunnerState();
+  } catch (err) {
+    const runner = $("runner-state");
+    if (runner) runner.textContent = `取得失敗: ${err.message}`;
+  }
+  try {
     await loadAnalytics();
   } catch (err) {
     $("metrics-grid").textContent = `レポート取得失敗: ${err.message}`;
@@ -1409,6 +1487,7 @@ async function init() {
       await loadStatus();
       await loadWatchlist();
       await loadAlerts();
+      await loadRunnerState();
       await loadNewsInsights();
     } catch (err) {
       $("status-exchange").textContent = `取引所: エラー (${err.message})`;
@@ -1434,6 +1513,17 @@ async function init() {
     alertModal.addEventListener("click", (event) => {
       const target = event.target;
       if (target?.dataset?.close) closeAlertModal();
+    });
+  }
+  const openSafety = $("open-safety-modal");
+  if (openSafety) openSafety.addEventListener("click", openSafetyModal);
+  const safetyForm = $("safety-form");
+  if (safetyForm) safetyForm.addEventListener("submit", handleSafetySubmit);
+  const safetyModal = $("safety-modal");
+  if (safetyModal) {
+    safetyModal.addEventListener("click", (event) => {
+      const target = event.target;
+      if (target?.dataset?.close) closeSafetyModal();
     });
   }
   $("quick-ingest").addEventListener("click", handleQuickIngest);
@@ -1488,6 +1578,7 @@ async function init() {
     loadWatchlist().catch(() => {});
     loadPortfolio().catch(() => {});
     loadAlerts(true).catch(() => {});
+    loadRunnerState().catch(() => {});
   }, 15000);
 }
 

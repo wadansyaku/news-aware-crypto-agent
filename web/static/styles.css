@@ -322,6 +322,13 @@ select {
   color: var(--ink);
 }
 
+.note {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
 .stat-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
@@ -360,6 +367,39 @@ select {
   padding: 10px 12px;
   border-radius: 12px;
   border: 1px dashed var(--border);
+}
+
+.runner-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.7);
+  display: grid;
+  gap: 8px;
+}
+
+.runner-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.runner-head .label {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.runner-meta {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.runner-hint {
+  font-size: 12px;
+  color: var(--muted);
 }
 
 .table-wrap {

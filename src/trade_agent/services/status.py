@@ -45,10 +45,12 @@ def get_status(settings: AppSettings) -> dict[str, Any]:
             "symbols": settings.trading.symbol_whitelist,
             "timeframes": settings.trading.timeframes,
             "mode": settings.trading.mode,
+            "dry_run": settings.trading.dry_run,
             "require_approval": settings.trading.require_approval,
             "approval_phrase": settings.trading.approval_phrase,
             "kill_switch": settings.trading.kill_switch,
             "autopilot_enabled": settings.autopilot.enabled,
+            "i_understand_live_trading": settings.trading.i_understand_live_trading,
             "risk": {
                 "capital_jpy": settings.risk.capital_jpy,
                 "max_loss_jpy_per_day": settings.risk.max_loss_jpy_per_day,

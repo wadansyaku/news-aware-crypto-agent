@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -8,7 +10,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from trade_agent.config import ConfigValidationException
+from trade_agent.config import ConfigValidationException, load_raw_config, save_raw_config
 from trade_agent.services import (
     approval,
     alerts,
@@ -78,6 +80,15 @@ class ClosePositionRequest(BaseModel):
     mode: str = "paper"
 
 
+class SafetyUpdateRequest(BaseModel):
+    mode: Optional[str] = None
+    dry_run: Optional[bool] = None
+    require_approval: Optional[bool] = None
+    kill_switch: Optional[bool] = None
+    autopilot_enabled: Optional[bool] = None
+    i_understand_live_trading: Optional[bool] = None
+
+
 class AlertCreateRequest(BaseModel):
     symbol: str
     condition: str
@@ -101,11 +112,52 @@ def _load_settings():
         raise HTTPException(status_code=400, detail=message) from exc
 
 
+def _config_path() -> str:
+    return "config.yaml"
+
+
 @app.get("/api/status")
 async def status_api() -> dict:
     settings = _load_settings()
     store = context.open_store(settings)
     store.close()
+    return status.get_status(settings)
+
+
+@app.post("/api/config/safety")
+async def safety_update_api(payload: SafetyUpdateRequest) -> dict:
+    config_path = _config_path()
+    raw = load_raw_config(config_path)
+    if not isinstance(raw, dict):
+        raw = {}
+
+    trading = raw.setdefault("trading", {})
+    autopilot = raw.setdefault("autopilot", {})
+    if payload.mode:
+        if payload.mode not in {"paper", "live"}:
+            raise HTTPException(status_code=400, detail="invalid mode")
+        trading["mode"] = payload.mode
+    if payload.dry_run is not None:
+        trading["dry_run"] = bool(payload.dry_run)
+    if payload.require_approval is not None:
+        trading["require_approval"] = bool(payload.require_approval)
+    if payload.kill_switch is not None:
+        trading["kill_switch"] = bool(payload.kill_switch)
+    if payload.i_understand_live_trading is not None:
+        trading["i_understand_live_trading"] = bool(payload.i_understand_live_trading)
+    if payload.autopilot_enabled is not None:
+        autopilot["enabled"] = bool(payload.autopilot_enabled)
+
+    save_raw_config(config_path, raw)
+    settings = _load_settings()
+    store = context.open_store(settings)
+    try:
+        store.log_event(
+            "config_update",
+            {"scope": "safety", "updates": payload.model_dump(exclude_unset=True)},
+        )
+    finally:
+        store.close()
     return status.get_status(settings)
 
 
@@ -246,6 +298,32 @@ async def backtest_results_api(limit: int = 20) -> dict:
         return {"results": reports}
     finally:
         store.close()
+
+
+@app.get("/api/runner/state")
+async def runner_state_api() -> dict:
+    settings = _load_settings()
+    state_path = Path(settings.app.data_dir) / "runner_state.json"
+    if not state_path.exists():
+        return {"exists": False, "running": False}
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {"exists": True, "running": False, "error": "invalid state file"}
+    updated_at = datetime.fromtimestamp(state_path.stat().st_mtime, timezone.utc).isoformat()
+    now = datetime.now(timezone.utc)
+    max_interval = max(
+        settings.runner.market_poll_seconds,
+        settings.runner.news_poll_seconds,
+        settings.runner.propose_poll_seconds,
+    )
+    running = (now - datetime.fromisoformat(updated_at)).total_seconds() <= max_interval * 3
+    return {
+        "exists": True,
+        "running": running,
+        "updated_at": updated_at,
+        "state": state,
+    }
 
 
 @app.get("/api/watchlist")
