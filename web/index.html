@@ -29,6 +29,7 @@
           <a href="#approval">承認</a>
           <a href="#execute">実行</a>
           <a href="#report">レポート</a>
+          <a href="#analysis">分析</a>
           <a href="#backtest">バックテスト</a>
           <a href="#news">ニュース</a>
           <a href="#audit">監査</a>
@@ -455,7 +456,152 @@
         </div>
       </section>
 
-      <section class="card" id="backtest" data-step="8">
+      <section class="card" id="analysis" data-step="8">
+        <div class="card-head">
+          <h2>投資分析</h2>
+          <p>日次成績・提案の当たり外れ・外部口座を一画面で確認します。</p>
+        </div>
+        <form id="analysis-form" class="form">
+          <div class="form-grid">
+            <label>
+              <span>開始日</span>
+              <input type="date" id="analysis-start" />
+            </label>
+            <label>
+              <span>終了日</span>
+              <input type="date" id="analysis-end" />
+            </label>
+            <label>
+              <span>対象モード</span>
+              <select id="analysis-mode">
+                <option value="">すべて</option>
+                <option value="paper">ペーパー</option>
+                <option value="live">ライブ</option>
+              </select>
+            </label>
+            <label>
+              <span>シンボル</span>
+              <input type="text" id="analysis-symbol" placeholder="BTC/JPY" />
+            </label>
+          </div>
+          <div class="form-actions">
+            <button class="btn btn-primary" type="submit">分析を更新</button>
+            <button class="btn btn-ghost" type="button" id="refresh-analysis">最新を表示</button>
+            <button class="btn btn-ghost" type="button" id="external-ingest">外部口座を取り込む</button>
+          </div>
+        </form>
+        <div class="output" id="analysis-output"></div>
+        <div class="analysis-grid">
+          <div>
+            <div class="metrics" id="analysis-metrics"></div>
+            <div class="summary-grid" id="analysis-strategy-summary"></div>
+          </div>
+          <div class="chart-card">
+            <canvas id="analysis-daily-chart" height="180"></canvas>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="table" id="analysis-daily-table">
+            <thead>
+              <tr>
+                <th>日付</th>
+                <th>日次PnL</th>
+                <th>累積</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+
+        <div class="analysis-subhead">内部取引ログ</div>
+        <div class="table-wrap">
+          <table class="table" id="analysis-trades-table">
+            <thead>
+              <tr>
+                <th>日時</th>
+                <th>モード</th>
+                <th>シンボル</th>
+                <th>方向</th>
+                <th>サイズ</th>
+                <th>価格</th>
+                <th>PnL</th>
+                <th>戦略</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+
+        <div class="analysis-subhead">提案と結果の差分</div>
+        <div class="summary-grid" id="intent-summary"></div>
+        <div class="table-wrap">
+          <table class="table" id="intent-table">
+            <thead>
+              <tr>
+                <th>日時</th>
+                <th>Intent ID</th>
+                <th>シンボル</th>
+                <th>方向</th>
+                <th>意図価格</th>
+                <th>約定価格</th>
+                <th>充足率</th>
+                <th>スリッページ</th>
+                <th>PnL</th>
+                <th>結果</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+
+        <div class="analysis-subhead">外部口座（読み取り専用）</div>
+        <div class="analysis-grid">
+          <div class="panel-card">
+            <div class="panel-title">残高サマリ</div>
+            <div class="summary-grid" id="external-summary"></div>
+            <div class="table-wrap">
+              <table class="table" id="external-balances-table">
+                <thead>
+                  <tr>
+                    <th>通貨</th>
+                    <th>合計</th>
+                    <th>利用可能</th>
+                    <th>拘束</th>
+                    <th>概算JPY</th>
+                    <th>更新</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="panel-card">
+            <div class="panel-title">外部取引の成績</div>
+            <div class="metrics" id="external-metrics"></div>
+            <div class="chart-card">
+              <canvas id="external-daily-chart" height="180"></canvas>
+            </div>
+            <div class="table-wrap">
+              <table class="table" id="external-trades-table">
+                <thead>
+                  <tr>
+                    <th>日時</th>
+                    <th>シンボル</th>
+                    <th>方向</th>
+                    <th>サイズ</th>
+                    <th>価格</th>
+                    <th>PnL</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        <div class="output" id="external-output"></div>
+      </section>
+
+      <section class="card" id="backtest" data-step="9">
         <div class="card-head">
           <h2>バックテストダッシュボード</h2>
           <p>過去データでの戦略パフォーマンスを可視化します。</p>
@@ -526,7 +672,7 @@
         </div>
       </section>
 
-      <section class="card" id="news" data-step="9">
+      <section class="card" id="news" data-step="10">
         <div class="card-head">
           <h2>News Insights</h2>
           <p>ニュースセンチメントとキーワードを可視化します。</p>
@@ -547,7 +693,7 @@
         </div>
       </section>
 
-      <section class="card" id="audit" data-step="10">
+      <section class="card" id="audit" data-step="11">
         <div class="card-head">
           <h2>監査ログ</h2>
           <p>risk_check など重要な判断理由を分析できます。</p>
@@ -592,7 +738,7 @@
         <div class="audit-list" id="audit-list"></div>
       </section>
 
-      <section class="card" id="guide" data-step="11">
+      <section class="card" id="guide" data-step="12">
         <div class="card-head">
           <h2>取引所切替の簡易ガイド</h2>
           <p>スポット対応・ローソク取得可否を基準に選択してください。</p>

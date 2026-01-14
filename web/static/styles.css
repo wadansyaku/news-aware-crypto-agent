@@ -600,6 +600,26 @@ select {
   margin-top: 12px;
 }
 
+.analysis-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.analysis-subhead {
+  margin: 18px 0 8px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
 .metric {
   background: #fff;
   padding: 12px;
@@ -972,6 +992,9 @@ select {
     display: none;
   }
   .panel-grid {
+    grid-template-columns: 1fr;
+  }
+  .analysis-grid {
     grid-template-columns: 1fr;
   }
 }

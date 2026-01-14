@@ -12,4 +12,6 @@ __all__ = [
     "positions",
     "portfolio",
     "alerts",
+    "analysis",
+    "external",
 ]

@@ -290,6 +290,81 @@ class SQLiteStore:
     def list_fills(self, symbol: str | None = None, limit: int = 1000) -> list[sqlite3.Row]:
         return db.list_fills(self.conn, symbol=symbol, limit=limit)
 
+    def save_external_balance(
+        self,
+        exchange: str,
+        currency: str,
+        total: float,
+        free: float,
+        used: float,
+        ts: str,
+        raw_json: str,
+    ) -> None:
+        db.insert_external_balance(
+            self.conn,
+            exchange=exchange,
+            currency=currency,
+            total=total,
+            free=free,
+            used=used,
+            ts=ts,
+            raw_json=raw_json,
+        )
+
+    def save_external_trade(
+        self,
+        trade_uid: str,
+        exchange: str,
+        trade_id: str | None,
+        symbol: str,
+        side: str,
+        price: float,
+        amount: float,
+        cost: float,
+        fee: float,
+        fee_currency: str,
+        ts: str,
+        raw_json: str,
+    ) -> bool:
+        return db.insert_external_trade(
+            self.conn,
+            trade_uid=trade_uid,
+            exchange=exchange,
+            trade_id=trade_id,
+            symbol=symbol,
+            side=side,
+            price=price,
+            amount=amount,
+            cost=cost,
+            fee=fee,
+            fee_currency=fee_currency,
+            ts=ts,
+            raw_json=raw_json,
+        )
+
+    def list_external_trades_between(
+        self,
+        exchange: str,
+        start_iso: str | None,
+        end_iso: str | None,
+        symbol: str | None = None,
+    ) -> list[sqlite3.Row]:
+        return db.list_external_trades_between(
+            self.conn,
+            exchange=exchange,
+            start_iso=start_iso,
+            end_iso=end_iso,
+            symbol=symbol,
+        )
+
+    def get_latest_external_trade_ts(
+        self, exchange: str, symbol: str | None = None
+    ) -> str | None:
+        return db.get_latest_external_trade_ts(self.conn, exchange=exchange, symbol=symbol)
+
+    def list_latest_external_balances(self, exchange: str) -> list[sqlite3.Row]:
+        return db.list_latest_external_balances(self.conn, exchange=exchange)
+
     def load_trades(self, mode: str | None = None) -> list[dict[str, Any]]:
         return metrics.load_trades_from_db(self.conn, mode)
 

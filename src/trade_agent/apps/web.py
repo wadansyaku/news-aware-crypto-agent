@@ -15,9 +15,11 @@ from trade_agent.config import ConfigValidationException, load_raw_config, save_
 from trade_agent.runner import Runner
 from trade_agent.services import (
     approval,
+    analysis,
     alerts,
     context,
     execution,
+    external,
     ingest,
     portfolio,
     positions,
@@ -107,6 +109,11 @@ class AlertCreateRequest(BaseModel):
     symbol: str
     condition: str
     threshold: float
+
+
+class ExternalIngestRequest(BaseModel):
+    symbols: Optional[list[str]] = None
+    limit: Optional[int] = None
 
 
 @app.get("/")
@@ -494,6 +501,64 @@ async def analytics_api(mode: Optional[str] = None) -> dict:
     store = context.open_store(settings)
     try:
         return reporting.analytics(settings, store, mode)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        store.close()
+
+
+@app.get("/api/analysis/performance")
+async def analysis_performance_api(
+    mode: Optional[str] = None,
+    symbol: Optional[str] = None,
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+) -> dict:
+    settings = _load_settings()
+    store = context.open_store(settings)
+    try:
+        return analysis.internal_performance(settings, store, mode, symbol, start, end)
+    finally:
+        store.close()
+
+
+@app.get("/api/analysis/intents")
+async def analysis_intents_api(
+    mode: Optional[str] = None,
+    symbol: Optional[str] = None,
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+) -> dict:
+    settings = _load_settings()
+    store = context.open_store(settings)
+    try:
+        return analysis.intent_outcomes(settings, store, mode, symbol, start, end)
+    finally:
+        store.close()
+
+
+@app.get("/api/external/summary")
+async def external_summary_api(
+    symbol: Optional[str] = None,
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+) -> dict:
+    settings = _load_settings()
+    store = context.open_store(settings)
+    try:
+        return analysis.external_summary(settings, store, symbol, start, end)
+    finally:
+        store.close()
+
+
+@app.post("/api/external/ingest")
+async def external_ingest_api(payload: ExternalIngestRequest) -> dict:
+    settings = _load_settings()
+    store = context.open_store(settings)
+    try:
+        return external.ingest_external(
+            settings, store, symbols=payload.symbols, limit=payload.limit
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     finally:

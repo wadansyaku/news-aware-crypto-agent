@@ -239,6 +239,32 @@ def init_db(conn: sqlite3.Connection) -> None:
             triggered_at TEXT,
             created_at TEXT NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS external_balances (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            exchange TEXT NOT NULL,
+            currency TEXT NOT NULL,
+            total REAL NOT NULL,
+            free REAL NOT NULL,
+            used REAL NOT NULL,
+            ts TEXT NOT NULL,
+            raw_json TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS external_trades (
+            trade_uid TEXT PRIMARY KEY,
+            exchange TEXT NOT NULL,
+            trade_id TEXT,
+            symbol TEXT NOT NULL,
+            side TEXT NOT NULL,
+            price REAL NOT NULL,
+            amount REAL NOT NULL,
+            cost REAL NOT NULL,
+            fee REAL NOT NULL,
+            fee_currency TEXT NOT NULL,
+            ts TEXT NOT NULL,
+            raw_json TEXT NOT NULL
+        );
         """
     )
 
@@ -288,6 +314,9 @@ def init_db(conn: sqlite3.Connection) -> None:
     _ensure_index(conn, "idx_orders_intent_id", "orders", "intent_id")
     _ensure_index(conn, "idx_daily_stats_day", "daily_stats", "day", unique=True)
     _ensure_index(conn, "idx_alerts_symbol", "alerts", "symbol")
+    _ensure_index(conn, "idx_external_trades_symbol_ts", "external_trades", "symbol, ts")
+    _ensure_index(conn, "idx_external_trades_ts", "external_trades", "ts")
+    _ensure_index(conn, "idx_external_balances_exchange_ts", "external_balances", "exchange, ts")
     conn.commit()
 
 
@@ -1102,4 +1131,124 @@ def list_fills(
     query += " ORDER BY ts ASC LIMIT ?"
     params.append(limit)
     cur = conn.execute(query, params)
+    return cur.fetchall()
+
+
+def insert_external_balance(
+    conn: sqlite3.Connection,
+    exchange: str,
+    currency: str,
+    total: float,
+    free: float,
+    used: float,
+    ts: str,
+    raw_json: str,
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO external_balances
+        (exchange, currency, total, free, used, ts, raw_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (exchange, currency, total, free, used, ts, raw_json),
+    )
+    conn.commit()
+
+
+def insert_external_trade(
+    conn: sqlite3.Connection,
+    trade_uid: str,
+    exchange: str,
+    trade_id: str | None,
+    symbol: str,
+    side: str,
+    price: float,
+    amount: float,
+    cost: float,
+    fee: float,
+    fee_currency: str,
+    ts: str,
+    raw_json: str,
+) -> bool:
+    before = conn.total_changes
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO external_trades
+        (trade_uid, exchange, trade_id, symbol, side, price, amount, cost, fee, fee_currency, ts, raw_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            trade_uid,
+            exchange,
+            trade_id,
+            symbol,
+            side,
+            price,
+            amount,
+            cost,
+            fee,
+            fee_currency,
+            ts,
+            raw_json,
+        ),
+    )
+    conn.commit()
+    return (conn.total_changes - before) > 0
+
+
+def list_external_trades_between(
+    conn: sqlite3.Connection,
+    exchange: str,
+    start_iso: str | None,
+    end_iso: str | None,
+    symbol: str | None = None,
+) -> list[sqlite3.Row]:
+    query = "SELECT * FROM external_trades WHERE exchange = ?"
+    params: list[Any] = [exchange]
+    if symbol:
+        query += " AND symbol = ?"
+        params.append(symbol)
+    if start_iso:
+        query += " AND ts >= ?"
+        params.append(start_iso)
+    if end_iso:
+        query += " AND ts <= ?"
+        params.append(end_iso)
+    query += " ORDER BY ts ASC"
+    cur = conn.execute(query, params)
+    return cur.fetchall()
+
+
+def get_latest_external_trade_ts(
+    conn: sqlite3.Connection, exchange: str, symbol: str | None = None
+) -> str | None:
+    query = "SELECT MAX(ts) as max_ts FROM external_trades WHERE exchange = ?"
+    params: list[Any] = [exchange]
+    if symbol:
+        query += " AND symbol = ?"
+        params.append(symbol)
+    cur = conn.execute(query, params)
+    row = cur.fetchone()
+    return str(row["max_ts"]) if row and row["max_ts"] else None
+
+
+def list_latest_external_balances(
+    conn: sqlite3.Connection, exchange: str
+) -> list[sqlite3.Row]:
+    cur = conn.execute(
+        """
+        SELECT b.*
+        FROM external_balances b
+        JOIN (
+            SELECT currency, MAX(ts) AS max_ts
+            FROM external_balances
+            WHERE exchange = ?
+            GROUP BY currency
+        ) latest
+          ON latest.currency = b.currency AND latest.max_ts = b.ts
+        WHERE b.exchange = ?
+        ORDER BY b.currency ASC
+        """,
+        (exchange, exchange),
+    )
     return cur.fetchall()

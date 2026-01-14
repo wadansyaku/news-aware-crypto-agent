@@ -85,6 +85,18 @@ class ExchangeClient:
     def fetch_ticker(self, symbol: str) -> dict[str, Any]:
         return self.exchange.fetch_ticker(symbol)
 
+    def fetch_balance(self) -> dict[str, Any]:
+        if not self.exchange.has.get("fetchBalance"):
+            raise RuntimeError(f"{self.exchange.id} fetchBalance() is not supported")
+        return self.exchange.fetch_balance()
+
+    def fetch_my_trades(
+        self, symbol: str, since: int | None = None, limit: int | None = None
+    ) -> list[dict[str, Any]]:
+        if not self.exchange.has.get("fetchMyTrades"):
+            raise RuntimeError(f"{self.exchange.id} fetchMyTrades() is not supported")
+        return self.exchange.fetch_my_trades(symbol, since=since, limit=limit)
+
     def create_limit_order(
         self, symbol: str, side: str, amount: float, price: float, post_only: bool
     ) -> dict[str, Any]:

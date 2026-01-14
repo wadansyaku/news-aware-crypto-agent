@@ -27,6 +27,9 @@ const state = {
   alerts: [],
   portfolio: null,
   runner: null,
+  analysis: null,
+  intentOutcomes: null,
+  external: null,
 };
 
 function formatIso(value) {
@@ -477,6 +480,7 @@ async function loadStatus() {
   if (!$("ingest-symbol").value) $("ingest-symbol").value = defaultSymbol;
   if (!$("propose-symbol").value) $("propose-symbol").value = defaultSymbol;
   if (!$("backtest-symbol").value) $("backtest-symbol").value = defaultSymbol;
+  if ($("analysis-symbol") && !$("analysis-symbol").value) $("analysis-symbol").value = defaultSymbol;
   updateAlertSymbolOptions();
   await loadPosition();
   await loadPortfolio();
@@ -648,8 +652,9 @@ function renderAuditTimeline(logs) {
   timeline.innerHTML = items.join("");
 }
 
-function renderMetrics(metrics) {
-  const grid = $("metrics-grid");
+function renderMetrics(metrics, targetId = "metrics-grid") {
+  const grid = $(targetId);
+  if (!grid) return;
   if (!metrics) {
     grid.innerHTML = "";
     return;
@@ -686,6 +691,203 @@ function renderTrades(trades) {
       <td>${number.format(trade.size)}</td>
       <td>${currency.format(trade.price)}</td>
       <td>${currency.format(trade.pnl_jpy)}</td>
+    `;
+    tbody.appendChild(row);
+  });
+}
+
+function renderStrategySummary(stats) {
+  const container = $("analysis-strategy-summary");
+  if (!container) return;
+  if (!stats || !stats.length) {
+    container.innerHTML = "<div class=\"metric\"><span class=\"label\">戦略別</span><strong>データなし</strong></div>";
+    return;
+  }
+  container.innerHTML = stats
+    .map(
+      (item) => `
+      <div class="metric">
+        <span class="label">${item.strategy}</span>
+        <strong>${currency.format(item.total_pnl || 0)}</strong>
+        <div class="label">勝率 ${percent.format(item.win_rate || 0)} ・ ${number.format(item.count || 0)}件</div>
+      </div>
+    `
+    )
+    .join("");
+}
+
+function renderDailyTable(daily, tableId) {
+  const table = $(tableId);
+  if (!table) return;
+  const tbody = table.querySelector("tbody");
+  tbody.innerHTML = "";
+  if (!daily || !daily.length) {
+    const row = document.createElement("tr");
+    row.innerHTML = "<td colspan=\"3\">データがありません</td>";
+    tbody.appendChild(row);
+    return;
+  }
+  daily.forEach((item) => {
+    const row = document.createElement("tr");
+    row.innerHTML = `
+      <td>${item.day}</td>
+      <td>${currency.format(item.pnl_jpy || 0)}</td>
+      <td>${currency.format(item.equity || 0)}</td>
+    `;
+    tbody.appendChild(row);
+  });
+}
+
+function renderAnalysisTrades(trades) {
+  const table = $("analysis-trades-table");
+  if (!table) return;
+  const tbody = table.querySelector("tbody");
+  tbody.innerHTML = "";
+  if (!trades || !trades.length) {
+    const row = document.createElement("tr");
+    row.innerHTML = "<td colspan=\"8\">取引がありません</td>";
+    tbody.appendChild(row);
+    return;
+  }
+  trades.forEach((trade) => {
+    const row = document.createElement("tr");
+    row.innerHTML = `
+      <td>${formatIso(trade.created_at)}</td>
+      <td>${trade.mode || "-"}</td>
+      <td>${trade.symbol || "-"}</td>
+      <td>${trade.side || "-"}</td>
+      <td>${number.format(trade.size || 0)}</td>
+      <td>${currency.format(trade.price || 0)}</td>
+      <td>${currency.format(trade.pnl_jpy || 0)}</td>
+      <td>${trade.strategy || "-"}</td>
+    `;
+    tbody.appendChild(row);
+  });
+}
+
+function renderIntentSummary(summary) {
+  const container = $("intent-summary");
+  if (!container) return;
+  if (!summary) {
+    container.innerHTML = "";
+    return;
+  }
+  const items = [
+    { label: "件数", value: number.format(summary.total || 0) },
+    { label: "約定済み", value: number.format(summary.executed || 0) },
+    { label: "勝率", value: percent.format(summary.hit_rate || 0) },
+    { label: "平均スリッページ", value: `${number.format(summary.avg_slippage_bps || 0)} bps` },
+    { label: "平均充足率", value: percent.format(summary.avg_fill_ratio || 0) },
+  ];
+  container.innerHTML = items
+    .map(
+      (item) => `<div class="metric"><span class="label">${item.label}</span><strong>${item.value}</strong></div>`
+    )
+    .join("");
+}
+
+function renderIntentTable(items) {
+  const table = $("intent-table");
+  if (!table) return;
+  const tbody = table.querySelector("tbody");
+  tbody.innerHTML = "";
+  if (!items || !items.length) {
+    const row = document.createElement("tr");
+    row.innerHTML = "<td colspan=\"10\">提案がありません</td>";
+    tbody.appendChild(row);
+    return;
+  }
+  items.forEach((item) => {
+    const slippage = item.slippage_bps === null || item.slippage_bps === undefined
+      ? "-"
+      : `${number.format(item.slippage_bps)} bps`;
+    const fillRatio = percent.format(item.fill_ratio || 0);
+    const row = document.createElement("tr");
+    row.innerHTML = `
+      <td>${formatIso(item.created_at)}</td>
+      <td>${item.intent_id || "-"}</td>
+      <td>${item.symbol || "-"}</td>
+      <td>${item.side || "-"}</td>
+      <td>${currency.format(item.intent_price || 0)}</td>
+      <td>${currency.format(item.avg_price || 0)}</td>
+      <td>${fillRatio}</td>
+      <td>${slippage}</td>
+      <td>${item.pnl_jpy === null || item.pnl_jpy === undefined ? "-" : currency.format(item.pnl_jpy)}</td>
+      <td>${item.outcome || "-"}</td>
+    `;
+    tbody.appendChild(row);
+  });
+}
+
+function renderExternalSummary(data) {
+  const container = $("external-summary");
+  if (!container) return;
+  const balances = data?.balances || [];
+  const updatedAt = balances.reduce((latest, item) => {
+    if (!item.ts) return latest;
+    if (!latest) return item.ts;
+    return item.ts > latest ? item.ts : latest;
+  }, "");
+  const items = [
+    { label: "推定評価額", value: currency.format(data?.total_value_jpy || 0) },
+    { label: "通貨数", value: number.format(balances.length || 0) },
+    { label: "最終更新", value: updatedAt ? formatIso(updatedAt) : "-" },
+  ];
+  container.innerHTML = items
+    .map(
+      (item) => `<div class="metric"><span class="label">${item.label}</span><strong>${item.value}</strong></div>`
+    )
+    .join("");
+}
+
+function renderExternalBalances(balances) {
+  const table = $("external-balances-table");
+  if (!table) return;
+  const tbody = table.querySelector("tbody");
+  tbody.innerHTML = "";
+  if (!balances || !balances.length) {
+    const row = document.createElement("tr");
+    row.innerHTML = "<td colspan=\"6\">データがありません</td>";
+    tbody.appendChild(row);
+    return;
+  }
+  balances.forEach((bal) => {
+    const value = bal.value_jpy === null || bal.value_jpy === undefined
+      ? "-"
+      : currency.format(bal.value_jpy);
+    const row = document.createElement("tr");
+    row.innerHTML = `
+      <td>${bal.currency}</td>
+      <td>${number.format(bal.total || 0)}</td>
+      <td>${number.format(bal.free || 0)}</td>
+      <td>${number.format(bal.used || 0)}</td>
+      <td>${value}</td>
+      <td>${formatIso(bal.ts)}</td>
+    `;
+    tbody.appendChild(row);
+  });
+}
+
+function renderExternalTrades(trades) {
+  const table = $("external-trades-table");
+  if (!table) return;
+  const tbody = table.querySelector("tbody");
+  tbody.innerHTML = "";
+  if (!trades || !trades.length) {
+    const row = document.createElement("tr");
+    row.innerHTML = "<td colspan=\"6\">取引がありません</td>";
+    tbody.appendChild(row);
+    return;
+  }
+  trades.forEach((trade) => {
+    const row = document.createElement("tr");
+    row.innerHTML = `
+      <td>${formatIso(trade.created_at)}</td>
+      <td>${trade.symbol || "-"}</td>
+      <td>${trade.side || "-"}</td>
+      <td>${number.format(trade.size || 0)}</td>
+      <td>${currency.format(trade.price || 0)}</td>
+      <td>${currency.format(trade.pnl_jpy || 0)}</td>
     `;
     tbody.appendChild(row);
   });
@@ -854,6 +1056,91 @@ async function handleBacktest(event) {
   }
 }
 
+function buildAnalysisQuery() {
+  const params = new URLSearchParams();
+  const start = $("analysis-start")?.value;
+  const end = $("analysis-end")?.value;
+  const mode = $("analysis-mode")?.value;
+  const symbol = $("analysis-symbol")?.value?.trim();
+  if (start) params.set("start", start);
+  if (end) params.set("end", end);
+  if (mode) params.set("mode", mode);
+  if (symbol) params.set("symbol", symbol);
+  return params.toString();
+}
+
+function renderAnalysisPerformance(data) {
+  renderMetrics(data.metrics || {}, "analysis-metrics");
+  renderStrategySummary(data.strategy_stats || []);
+  drawDailyBars("analysis-daily-chart", data.daily || []);
+  renderDailyTable(data.daily || [], "analysis-daily-table");
+  renderAnalysisTrades(data.trades || []);
+}
+
+function renderIntentOutcomesSection(data) {
+  renderIntentSummary(data.summary || {});
+  renderIntentTable(data.items || []);
+}
+
+function renderExternalSection(data) {
+  renderExternalSummary(data);
+  renderMetrics(data.metrics || {}, "external-metrics");
+  drawDailyBars("external-daily-chart", data.daily || []);
+  renderExternalBalances(data.balances || []);
+  renderExternalTrades(data.trades || []);
+}
+
+async function loadAnalysis() {
+  const query = buildAnalysisQuery();
+  const performanceUrl = query ? `/api/analysis/performance?${query}` : "/api/analysis/performance";
+  const intentUrl = query ? `/api/analysis/intents?${query}` : "/api/analysis/intents";
+  const externalUrl = query ? `/api/external/summary?${query}` : "/api/external/summary";
+  const [performance, intents, externalData] = await Promise.all([
+    apiRequest(performanceUrl),
+    apiRequest(intentUrl),
+    apiRequest(externalUrl),
+  ]);
+  state.analysis = performance;
+  state.intentOutcomes = intents;
+  state.external = externalData;
+  renderAnalysisPerformance(performance);
+  renderIntentOutcomesSection(intents);
+  renderExternalSection(externalData);
+}
+
+async function handleAnalysis(event) {
+  event.preventDefault();
+  const output = $("analysis-output");
+  output.textContent = "分析更新中...";
+  try {
+    await loadAnalysis();
+    setOutput(output, "分析更新完了", [], null, "ok");
+  } catch (err) {
+    setOutput(output, "分析更新失敗", [err.message], null, "error");
+  }
+}
+
+async function handleExternalIngest() {
+  const output = $("external-output");
+  output.textContent = "外部口座を取り込み中...";
+  try {
+    const data = await apiRequest("/api/external/ingest", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    setOutput(
+      output,
+      "外部取り込み完了",
+      [`Balances: ${data.balances}`, `Trades: ${data.trades}`],
+      data,
+      "ok"
+    );
+    await loadAnalysis();
+  } catch (err) {
+    setOutput(output, "外部取り込み失敗", [err.message], null, "error");
+  }
+}
+
 function renderNewsList(items) {
   const container = $("news-list");
   if (!items.length) {
@@ -1013,6 +1300,54 @@ function drawChart(series) {
     else ctx.lineTo(x, y);
   });
   ctx.stroke();
+}
+
+function drawDailyBars(canvasId, series) {
+  const canvas = $(canvasId);
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  const width = canvas.clientWidth;
+  const height = canvas.clientHeight;
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = width * dpr;
+  canvas.height = height * dpr;
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, width, height);
+
+  ctx.fillStyle = "#faf7f1";
+  ctx.fillRect(0, 0, width, height);
+
+  if (!series || !series.length) {
+    ctx.fillStyle = "#6f6a61";
+    ctx.font = "12px Hiragino Sans";
+    ctx.fillText("日次データがありません", 16, 24);
+    return;
+  }
+
+  const values = series.map((item) => Number(item.pnl_jpy || 0));
+  const maxAbs = Math.max(...values.map((v) => Math.abs(v)), 1);
+  const padding = 18;
+  const span = maxAbs * 2;
+  const min = -maxAbs;
+  const usableWidth = width - padding * 2;
+  const barWidth = usableWidth / series.length;
+  const plotHeight = height - padding * 2;
+  const zeroY = height - padding - ((0 - min) / span) * plotHeight;
+
+  ctx.strokeStyle = "rgba(15, 118, 110, 0.2)";
+  ctx.beginPath();
+  ctx.moveTo(padding, zeroY);
+  ctx.lineTo(width - padding, zeroY);
+  ctx.stroke();
+
+  series.forEach((item, idx) => {
+    const value = Number(item.pnl_jpy || 0);
+    const x = padding + idx * barWidth + barWidth * 0.15;
+    const barH = (Math.abs(value) / maxAbs) * plotHeight;
+    const y = value >= 0 ? zeroY - barH : zeroY;
+    ctx.fillStyle = value >= 0 ? "rgba(15, 118, 110, 0.6)" : "rgba(180, 35, 24, 0.6)";
+    ctx.fillRect(x, y, barWidth * 0.7, barH);
+  });
 }
 
 function drawEquityWithDrawdown(canvasId, series) {
@@ -1291,6 +1626,7 @@ async function handleIngest(event) {
     await loadWatchlist();
     await loadAlerts();
     await loadNewsInsights();
+    await loadAnalysis();
     await loadAuditSummary();
     await loadAudit();
   } catch (err) {
@@ -1372,6 +1708,7 @@ async function handleApprove(event) {
       await loadPosition();
       await loadPortfolio();
       await loadAnalytics($("report-mode").value);
+      await loadAnalysis();
       await loadAuditSummary();
     } else {
       const payload = { intent_id: intentId, phrase };
@@ -1406,6 +1743,7 @@ async function handleExecute(event) {
     await loadPosition();
     await loadPortfolio();
     await loadAnalytics($("report-mode").value);
+    await loadAnalysis();
     await loadAuditSummary();
     await loadAudit();
   } catch (err) {
@@ -1479,6 +1817,7 @@ async function handleQuickIngest() {
     await loadWatchlist();
     await loadAlerts();
     await loadNewsInsights();
+    await loadAnalysis();
     await loadAuditSummary();
     await loadAudit();
   } catch (err) {
@@ -1537,6 +1876,14 @@ async function init() {
   start.setDate(end.getDate() - 30);
   $("backtest-start").value = formatDateInput(start);
   $("backtest-end").value = formatDateInput(end);
+  if ($("analysis-start")) $("analysis-start").value = formatDateInput(start);
+  if ($("analysis-end")) $("analysis-end").value = formatDateInput(end);
+  try {
+    await loadAnalysis();
+  } catch (err) {
+    const output = $("analysis-output");
+    if (output) output.textContent = `分析取得失敗: ${err.message}`;
+  }
 
   $("refresh-status").addEventListener("click", async () => {
     try {
@@ -1612,6 +1959,12 @@ async function init() {
   $("refresh-analytics").addEventListener("click", async () => {
     await loadAnalytics($("report-mode").value);
   });
+  const analysisForm = $("analysis-form");
+  if (analysisForm) analysisForm.addEventListener("submit", handleAnalysis);
+  const refreshAnalysis = $("refresh-analysis");
+  if (refreshAnalysis) refreshAnalysis.addEventListener("click", loadAnalysis);
+  const externalIngest = $("external-ingest");
+  if (externalIngest) externalIngest.addEventListener("click", handleExternalIngest);
   $("backtest-form").addEventListener("submit", handleBacktest);
   $("refresh-backtest-results").addEventListener("click", loadBacktestResults);
   $("backtest-filter").addEventListener("input", renderBacktestTrades);
@@ -1636,6 +1989,8 @@ async function init() {
     drawChart(state.equity || []);
     drawEquityWithDrawdown("backtest-equity-chart", state.backtestEquity || []);
     drawSentimentTimeline("news-sentiment-chart", state.newsTimeline || []);
+    drawDailyBars("analysis-daily-chart", state.analysis?.daily || []);
+    drawDailyBars("external-daily-chart", state.external?.daily || []);
     drawGauge("risk-gauge", state.exposure || 0);
     if (state.portfolio) {
       drawPortfolioPie(
