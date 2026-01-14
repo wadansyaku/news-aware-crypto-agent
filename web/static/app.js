@@ -30,6 +30,11 @@ const state = {
   analysis: null,
   intentOutcomes: null,
   external: null,
+  timers: {
+    position: null,
+    general: null,
+    intents: null,
+  },
 };
 
 function formatIso(value) {
@@ -55,6 +60,36 @@ function formatDuration(startIso) {
   const days = Math.floor(hours / 24);
   const rem = hours % 24;
   return `${days}d ${rem}h`;
+}
+
+function formatAge(seconds) {
+  if (seconds === null || seconds === undefined || Number.isNaN(seconds)) return "-";
+  const secs = Math.max(0, Math.floor(seconds));
+  if (secs < 60) return `${secs}s`;
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m`;
+  const hours = Math.floor(mins / 60);
+  return `${hours}h`;
+}
+
+function parsePositiveInt(value, fallback) {
+  const num = Number(value);
+  if (Number.isNaN(num) || num <= 0) return fallback;
+  return Math.floor(num);
+}
+
+function loadUiSettings() {
+  const uiPoll = parsePositiveInt(localStorage.getItem("ui_poll_seconds"), 15);
+  const intentPoll = parsePositiveInt(localStorage.getItem("intent_poll_seconds"), 15);
+  return {
+    uiPollSeconds: uiPoll,
+    intentPollSeconds: intentPoll,
+  };
+}
+
+function saveUiSettings(settings) {
+  localStorage.setItem("ui_poll_seconds", String(settings.uiPollSeconds));
+  localStorage.setItem("intent_poll_seconds", String(settings.intentPollSeconds));
 }
 
 function applyConfig(config) {
@@ -211,6 +246,56 @@ function closeSafetyModal() {
   if (!modal) return;
   modal.classList.remove("show");
   modal.setAttribute("aria-hidden", "true");
+}
+
+function openFrequencyModal() {
+  const modal = $("frequency-modal");
+  if (!modal) return;
+  const runner = state.config?.runner || {};
+  $("runner-market-poll").value = Number(runner.market_poll_seconds ?? 30);
+  $("runner-news-poll").value = Number(runner.news_poll_seconds ?? 120);
+  $("runner-propose-poll").value = Number(runner.propose_poll_seconds ?? 60);
+  $("runner-propose-cooldown").value = Number(runner.propose_cooldown_seconds ?? 300);
+  const uiSettings = loadUiSettings();
+  $("ui-refresh-poll").value = uiSettings.uiPollSeconds;
+  $("ui-intent-poll").value = uiSettings.intentPollSeconds;
+  modal.classList.add("show");
+  modal.setAttribute("aria-hidden", "false");
+}
+
+function closeFrequencyModal() {
+  const modal = $("frequency-modal");
+  if (!modal) return;
+  modal.classList.remove("show");
+  modal.setAttribute("aria-hidden", "true");
+}
+
+async function handleFrequencySubmit(event) {
+  event.preventDefault();
+  const proposeCooldownRaw = Number($("runner-propose-cooldown").value);
+  const proposeCooldown = Number.isNaN(proposeCooldownRaw) || proposeCooldownRaw < 0
+    ? null
+    : Math.floor(proposeCooldownRaw);
+  const payload = {
+    market_poll_seconds: parsePositiveInt($("runner-market-poll").value, null),
+    news_poll_seconds: parsePositiveInt($("runner-news-poll").value, null),
+    propose_poll_seconds: parsePositiveInt($("runner-propose-poll").value, null),
+    propose_cooldown_seconds: proposeCooldown,
+  };
+  const uiPoll = parsePositiveInt($("ui-refresh-poll").value, 15);
+  const intentPoll = parsePositiveInt($("ui-intent-poll").value, 15);
+  saveUiSettings({ uiPollSeconds: uiPoll, intentPollSeconds: intentPoll });
+  startUiPolling();
+  try {
+    await apiRequest("/api/config/runner", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    await loadConfigLight();
+    closeFrequencyModal();
+  } catch (err) {
+    alert(`更新頻度の保存に失敗: ${err.message}`);
+  }
 }
 
 async function handleSafetySubmit(event) {
@@ -516,8 +601,56 @@ async function loadRiskState() {
   const used = data?.daily_orders ?? 0;
   const node = $("cfg-orders-used");
   if (node) {
-    node.textContent = `本日実行数: ${number.format(used)} / ${number.format(maxOrders)}`;
+    const reset = data?.reset_at_utc
+      ? `${data.reset_at_utc.replace("T", " ").slice(0, 16)} UTC`
+      : "-";
+    node.textContent = `本日実行数: ${number.format(used)} / ${number.format(maxOrders)} (リセット: ${reset})`;
   }
+}
+
+async function loadLightStatus() {
+  const data = await apiRequest("/api/status/light");
+  const marketNode = $("light-market");
+  const newsNode = $("light-news");
+  if (!marketNode || !newsNode) return;
+  const market = data.market || {};
+  const news = data.news || {};
+  const marketAge = formatAge(market.age_seconds);
+  const newsAge = formatAge(news.age_seconds);
+  const marketReason = market.reason === "no state" ? "未更新" : market.reason || "NG";
+  const newsReason = news.reason === "no state" ? "未更新" : news.reason || "NG";
+  marketNode.textContent = market.ok
+    ? `市場: OK (${marketAge}前)`
+    : `市場: ${marketReason}`;
+  newsNode.textContent = news.ok
+    ? `ニュース: OK (${newsAge}前)`
+    : `ニュース: ${newsReason}`;
+}
+
+function startUiPolling() {
+  const settings = loadUiSettings();
+  if (state.timers.position) clearInterval(state.timers.position);
+  if (state.timers.general) clearInterval(state.timers.general);
+  if (state.timers.intents) clearInterval(state.timers.intents);
+
+  state.timers.position = setInterval(() => {
+    loadPosition().catch(() => {});
+  }, 10000);
+
+  state.timers.general = setInterval(() => {
+    loadConfigLight().catch(() => {});
+    loadRiskState().catch(() => {});
+    loadLightStatus().catch(() => {});
+    loadWatchlist().catch(() => {});
+    loadPortfolio().catch(() => {});
+    loadAlerts(true).catch(() => {});
+    loadRunnerState().catch(() => {});
+    loadAuditSummary().catch(() => {});
+  }, settings.uiPollSeconds * 1000);
+
+  state.timers.intents = setInterval(() => {
+    loadIntents().catch(() => {});
+  }, settings.intentPollSeconds * 1000);
 }
 
 async function loadPosition() {
@@ -1876,6 +2009,12 @@ async function init() {
     const node = $("cfg-orders-used");
     if (node) node.textContent = `本日実行数: 取得失敗`;
   }
+  try {
+    await loadLightStatus();
+  } catch (err) {
+    const marketNode = $("light-market");
+    if (marketNode) marketNode.textContent = "市場: 取得失敗";
+  }
   updateNotificationStatus();
   try {
     await loadWatchlist();
@@ -1930,6 +2069,7 @@ async function init() {
     try {
       await loadStatus();
       await loadRiskState();
+      await loadLightStatus();
       await loadWatchlist();
       await loadAlerts();
       await loadRunnerState();
@@ -1969,6 +2109,17 @@ async function init() {
     safetyModal.addEventListener("click", (event) => {
       const target = event.target;
       if (target?.dataset?.close) closeSafetyModal();
+    });
+  }
+  const openFrequency = $("open-frequency-modal");
+  if (openFrequency) openFrequency.addEventListener("click", openFrequencyModal);
+  const frequencyForm = $("frequency-form");
+  if (frequencyForm) frequencyForm.addEventListener("submit", handleFrequencySubmit);
+  const frequencyModal = $("frequency-modal");
+  if (frequencyModal) {
+    frequencyModal.addEventListener("click", (event) => {
+      const target = event.target;
+      if (target?.dataset?.close) closeFrequencyModal();
     });
   }
   const runnerStart = $("runner-start");
@@ -2043,20 +2194,7 @@ async function init() {
     }
   });
 
-  setInterval(() => {
-    loadPosition().catch(() => {});
-  }, 10000);
-
-  setInterval(() => {
-    loadConfigLight().catch(() => {});
-    loadRiskState().catch(() => {});
-    loadIntents().catch(() => {});
-    loadAuditSummary().catch(() => {});
-    loadWatchlist().catch(() => {});
-    loadPortfolio().catch(() => {});
-    loadAlerts(true).catch(() => {});
-    loadRunnerState().catch(() => {});
-  }, 15000);
+  startUiPolling();
 }
 
 window.addEventListener("DOMContentLoaded", init);

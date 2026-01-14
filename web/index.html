@@ -4,8 +4,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>News-aware Crypto Agent</title>
-    <link rel="stylesheet" href="/static/styles.css" />
-    <script defer src="/static/app.js"></script>
+    <link rel="stylesheet" href="/static/styles.css?v=2" />
+    <script defer src="/static/app.js?v=2"></script>
   </head>
   <body>
     <div class="bg">
@@ -181,6 +181,10 @@
             <strong>リアルタイムランナー</strong>
             <span class="label" id="runner-state">未起動</span>
           </div>
+          <div class="runner-light">
+            <span class="status-pill" id="light-market">市場: -</span>
+            <span class="status-pill" id="light-news">ニュース: -</span>
+          </div>
           <div class="runner-meta">
             <span>市場: <span id="runner-market-at">-</span></span>
             <span>ニュース: <span id="runner-news-at">-</span></span>
@@ -193,6 +197,9 @@
             </select>
             <button class="btn btn-primary" id="runner-start">開始</button>
             <button class="btn btn-ghost" id="runner-stop">停止</button>
+          </div>
+          <div class="runner-actions">
+            <button class="btn btn-ghost" id="open-frequency-modal">更新頻度を編集</button>
           </div>
           <div class="runner-hint">
             起動: <code>uv run trade-agent run --strategy news_overlay</code>
@@ -866,6 +873,51 @@
           <div class="hint">
             ライブ取引は <code>I_UNDERSTAND_LIVE_TRADING=true</code> と
             ここでのフラグ両方が必要です。
+          </div>
+          <div class="modal-actions">
+            <button class="btn btn-ghost" type="button" data-close="true">キャンセル</button>
+            <button class="btn btn-primary" type="submit">保存する</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="modal" id="frequency-modal" aria-hidden="true">
+      <div class="modal-backdrop" data-close="true"></div>
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="frequency-modal-title">
+        <div class="modal-head">
+          <h3 id="frequency-modal-title">更新頻度設定</h3>
+          <button class="icon-button" type="button" data-close="true">×</button>
+        </div>
+        <form id="frequency-form" class="form">
+          <div class="form-grid">
+            <label>
+              <span>市場取り込み（秒）</span>
+              <input type="number" id="runner-market-poll" min="5" step="1" />
+            </label>
+            <label>
+              <span>ニュース取り込み（秒）</span>
+              <input type="number" id="runner-news-poll" min="10" step="1" />
+            </label>
+            <label>
+              <span>提案生成（秒）</span>
+              <input type="number" id="runner-propose-poll" min="10" step="1" />
+            </label>
+            <label>
+              <span>提案クールダウン（秒）</span>
+              <input type="number" id="runner-propose-cooldown" min="0" step="10" />
+            </label>
+            <label>
+              <span>UI更新（秒）</span>
+              <input type="number" id="ui-refresh-poll" min="5" step="1" />
+            </label>
+            <label>
+              <span>Intent更新（秒）</span>
+              <input type="number" id="ui-intent-poll" min="5" step="1" />
+            </label>
+          </div>
+          <div class="hint">
+            Runnerの反映は再起動が必要です。UI更新は即時反映されます。
           </div>
           <div class="modal-actions">
             <button class="btn btn-ghost" type="button" data-close="true">キャンセル</button>

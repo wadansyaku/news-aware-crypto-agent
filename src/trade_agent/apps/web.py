@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -117,6 +117,16 @@ class ExternalIngestRequest(BaseModel):
     limit: Optional[int] = None
 
 
+class RunnerUpdateRequest(BaseModel):
+    market_poll_seconds: Optional[int] = None
+    news_poll_seconds: Optional[int] = None
+    propose_poll_seconds: Optional[int] = None
+    propose_cooldown_seconds: Optional[int] = None
+    orderbook: Optional[bool] = None
+    jitter_seconds: Optional[int] = None
+    max_backoff_seconds: Optional[int] = None
+
+
 @app.get("/")
 async def index() -> FileResponse:
     return FileResponse(WEB_DIR / "index.html")
@@ -146,6 +156,50 @@ async def status_api() -> dict:
     return status.get_status(settings)
 
 
+@app.get("/api/status/light")
+async def status_light_api() -> dict:
+    settings = _load_settings()
+    state_path = Path(settings.app.data_dir) / "runner_state.json"
+    now = datetime.now(timezone.utc)
+    if not state_path.exists():
+        return {
+            "market": {"ok": False, "reason": "no state"},
+            "news": {"ok": False, "reason": "no state"},
+        }
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {
+            "market": {"ok": False, "reason": "invalid state"},
+            "news": {"ok": False, "reason": "invalid state"},
+        }
+
+    def _status(key: str, poll_seconds: int) -> dict:
+        ts = state.get(key)
+        if not ts:
+            return {"ok": False, "reason": "no timestamp"}
+        try:
+            dt = datetime.fromisoformat(ts)
+        except ValueError:
+            return {"ok": False, "reason": "invalid timestamp"}
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        else:
+            dt = dt.astimezone(timezone.utc)
+        age = (now - dt).total_seconds()
+        ok = age <= poll_seconds * 3
+        return {
+            "ok": ok,
+            "last_success_at": dt.isoformat(),
+            "age_seconds": age,
+        }
+
+    return {
+        "market": _status("last_success_ingest_market_at", settings.runner.market_poll_seconds),
+        "news": _status("last_success_ingest_news_at", settings.runner.news_poll_seconds),
+    }
+
+
 @app.get("/api/config")
 async def config_api() -> dict:
     settings = _load_settings()
@@ -164,11 +218,14 @@ async def risk_state_api() -> dict:
         daily_orders = store.get_daily_execution_count(day)
         daily_pnl = store.get_daily_pnl(day)
         last_exec = store.get_last_execution_time()
+        reset_at = datetime.now(timezone.utc).date() + timedelta(days=1)
+        reset_at_utc = datetime.combine(reset_at, datetime.min.time(), tzinfo=timezone.utc).isoformat()
         return {
             "day": day,
             "daily_orders": daily_orders,
             "daily_pnl": daily_pnl,
             "last_exec_at": last_exec,
+            "reset_at_utc": reset_at_utc,
         }
     finally:
         store.close()
@@ -218,6 +275,47 @@ async def safety_update_api(payload: SafetyUpdateRequest) -> dict:
     finally:
         store.close()
     return status.get_status(settings)
+
+
+@app.post("/api/config/runner")
+async def runner_update_api(payload: RunnerUpdateRequest) -> dict:
+    config_path = _config_path()
+    raw = load_raw_config(config_path)
+    if not isinstance(raw, dict):
+        raw = {}
+
+    runner = raw.setdefault("runner", {})
+    fields = {
+        "market_poll_seconds": payload.market_poll_seconds,
+        "news_poll_seconds": payload.news_poll_seconds,
+        "propose_poll_seconds": payload.propose_poll_seconds,
+        "propose_cooldown_seconds": payload.propose_cooldown_seconds,
+        "jitter_seconds": payload.jitter_seconds,
+        "max_backoff_seconds": payload.max_backoff_seconds,
+    }
+    for key, value in fields.items():
+        if value is None:
+            continue
+        if key == "propose_cooldown_seconds":
+            if value < 0:
+                raise HTTPException(status_code=400, detail=f"{key} must be >= 0")
+        elif value < 1:
+            raise HTTPException(status_code=400, detail=f"{key} must be >= 1")
+        runner[key] = int(value)
+    if payload.orderbook is not None:
+        runner["orderbook"] = bool(payload.orderbook)
+
+    save_raw_config(config_path, raw)
+    settings = _load_settings()
+    store = context.open_store(settings)
+    try:
+        store.log_event(
+            "config_update",
+            {"scope": "runner", "updates": payload.model_dump(exclude_unset=True)},
+        )
+    finally:
+        store.close()
+    return {"config": status.get_config_snapshot(settings)}
 
 
 @app.post("/api/ingest")

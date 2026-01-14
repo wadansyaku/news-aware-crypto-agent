@@ -26,6 +26,15 @@ def get_config_snapshot(settings: AppSettings) -> dict[str, Any]:
             "cooldown_minutes": settings.risk.cooldown_minutes,
             "cooldown_bypass_pct": settings.risk.cooldown_bypass_pct,
         },
+        "runner": {
+            "market_poll_seconds": settings.runner.market_poll_seconds,
+            "news_poll_seconds": settings.runner.news_poll_seconds,
+            "propose_poll_seconds": settings.runner.propose_poll_seconds,
+            "propose_cooldown_seconds": settings.runner.propose_cooldown_seconds,
+            "orderbook": settings.runner.orderbook,
+            "jitter_seconds": settings.runner.jitter_seconds,
+            "max_backoff_seconds": settings.runner.max_backoff_seconds,
+        },
     }
 
 
