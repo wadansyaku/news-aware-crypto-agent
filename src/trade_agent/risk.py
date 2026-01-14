@@ -73,7 +73,8 @@ def evaluate_plan(
     if last_exec_time:
         cooldown = last_exec_time + timedelta(minutes=risk.cooldown_minutes)
         if current_time < cooldown:
-            return RiskResult(approved=False, reason="cooldown active")
+            if not _cooldown_bypass_active(store, plan, trading, risk):
+                return RiskResult(approved=False, reason="cooldown active")
 
     position = (
         current_position if current_position is not None else store.get_position_size(plan.symbol)
@@ -114,3 +115,23 @@ def evaluate_plan(
         strategy=plan.strategy,
     )
     return RiskResult(approved=True, reason="ok", plan=adjusted)
+
+
+def _cooldown_bypass_active(
+    store: SQLiteStore, plan: TradePlan, trading: TradingConfig, risk: RiskConfig
+) -> bool:
+    if risk.cooldown_bypass_pct <= 0:
+        return False
+    timeframe = trading.timeframes[0] if trading.timeframes else "1m"
+    try:
+        recent = store.list_recent_candles(plan.symbol, timeframe, limit=2)
+    except Exception:  # noqa: BLE001
+        return False
+    if len(recent) < 2:
+        return False
+    latest = float(recent[0]["close"])
+    prev = float(recent[1]["close"])
+    if prev <= 0:
+        return False
+    move = abs((latest - prev) / prev)
+    return move >= risk.cooldown_bypass_pct

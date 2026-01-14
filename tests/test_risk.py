@@ -36,6 +36,7 @@ def test_kill_switch_blocks() -> None:
         max_loss_jpy_per_day=100000,
         max_orders_per_day=10,
         cooldown_minutes=0,
+        cooldown_bypass_pct=0.0,
     )
     plan = TradePlan(
         symbol="BTC/JPY",
@@ -61,6 +62,7 @@ def test_notional_cap_adjusts_size() -> None:
         max_loss_jpy_per_day=100000,
         max_orders_per_day=10,
         cooldown_minutes=0,
+        cooldown_bypass_pct=0.0,
     )
     plan = TradePlan(
         symbol="BTC/JPY",

@@ -178,6 +178,14 @@
             <span>ニュース: <span id="runner-news-at">-</span></span>
             <span>提案: <span id="runner-propose-at">-</span></span>
           </div>
+          <div class="runner-actions">
+            <select id="runner-strategy">
+              <option value="baseline">価格のみ（baseline）</option>
+              <option value="news_overlay">ニュース重視（overlay）</option>
+            </select>
+            <button class="btn btn-primary" id="runner-start">開始</button>
+            <button class="btn btn-ghost" id="runner-stop">停止</button>
+          </div>
           <div class="runner-hint">
             起動: <code>uv run trade-agent run --strategy news_overlay</code>
           </div>
@@ -557,6 +565,9 @@
               <label class="chip"><input type="checkbox" value="ingest" />ingest</label>
               <label class="chip"><input type="checkbox" value="backtest" />backtest</label>
               <label class="chip"><input type="checkbox" value="report" />report</label>
+              <label class="chip"><input type="checkbox" value="config_update" />config_update</label>
+              <label class="chip"><input type="checkbox" value="runner_start" />runner_start</label>
+              <label class="chip"><input type="checkbox" value="runner_stop" />runner_stop</label>
             </div>
           </label>
           <label>
@@ -681,6 +692,14 @@
             <label class="checkbox">
               <input type="checkbox" id="safety-live-ack" />
               <span>ライブ取引の理解フラグ</span>
+            </label>
+            <label>
+              <span>クールダウン（分）</span>
+              <input type="number" id="safety-cooldown-minutes" min="0" step="1" />
+            </label>
+            <label>
+              <span>急変時の解除閾値（%）</span>
+              <input type="number" id="safety-cooldown-bypass" min="0" step="0.1" />
             </label>
           </div>
           <div class="hint">

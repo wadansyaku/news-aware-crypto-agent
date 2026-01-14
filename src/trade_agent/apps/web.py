@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -11,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from trade_agent.config import ConfigValidationException, load_raw_config, save_raw_config
+from trade_agent.runner import Runner
 from trade_agent.services import (
     approval,
     alerts,
@@ -32,6 +34,10 @@ STATIC_DIR = WEB_DIR / "static"
 app = FastAPI(title="Trade Agent Web", docs_url=None, redoc_url=None)
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+_RUNNER_LOCK = threading.Lock()
+_RUNNER_THREAD: threading.Thread | None = None
+_RUNNER_INSTANCE: Runner | None = None
 
 
 class IngestRequest(BaseModel):
@@ -87,6 +93,13 @@ class SafetyUpdateRequest(BaseModel):
     kill_switch: Optional[bool] = None
     autopilot_enabled: Optional[bool] = None
     i_understand_live_trading: Optional[bool] = None
+    cooldown_minutes: Optional[int] = None
+    cooldown_bypass_pct: Optional[float] = None
+
+
+class RunnerStartRequest(BaseModel):
+    strategy: str = "news_overlay"
+    mode: str = "paper"
 
 
 class AlertCreateRequest(BaseModel):
@@ -133,6 +146,7 @@ async def safety_update_api(payload: SafetyUpdateRequest) -> dict:
 
     trading = raw.setdefault("trading", {})
     autopilot = raw.setdefault("autopilot", {})
+    risk = raw.setdefault("risk", {})
     if payload.mode:
         if payload.mode not in {"paper", "live"}:
             raise HTTPException(status_code=400, detail="invalid mode")
@@ -147,6 +161,10 @@ async def safety_update_api(payload: SafetyUpdateRequest) -> dict:
         trading["i_understand_live_trading"] = bool(payload.i_understand_live_trading)
     if payload.autopilot_enabled is not None:
         autopilot["enabled"] = bool(payload.autopilot_enabled)
+    if payload.cooldown_minutes is not None:
+        risk["cooldown_minutes"] = int(payload.cooldown_minutes)
+    if payload.cooldown_bypass_pct is not None:
+        risk["cooldown_bypass_pct"] = float(payload.cooldown_bypass_pct)
 
     save_raw_config(config_path, raw)
     settings = _load_settings()
@@ -311,19 +329,100 @@ async def runner_state_api() -> dict:
     except json.JSONDecodeError:
         return {"exists": True, "running": False, "error": "invalid state file"}
     updated_at = datetime.fromtimestamp(state_path.stat().st_mtime, timezone.utc).isoformat()
-    now = datetime.now(timezone.utc)
-    max_interval = max(
-        settings.runner.market_poll_seconds,
-        settings.runner.news_poll_seconds,
-        settings.runner.propose_poll_seconds,
-    )
-    running = (now - datetime.fromisoformat(updated_at)).total_seconds() <= max_interval * 3
+    running = _runner_state_running(settings)
     return {
         "exists": True,
         "running": running,
         "updated_at": updated_at,
         "state": state,
     }
+
+
+def _runner_running() -> bool:
+    return _RUNNER_THREAD is not None and _RUNNER_THREAD.is_alive()
+
+
+def _runner_state_running(settings) -> bool:
+    state_path = Path(settings.app.data_dir) / "runner_state.json"
+    if not state_path.exists():
+        return False
+    updated_at = datetime.fromtimestamp(state_path.stat().st_mtime, timezone.utc)
+    max_interval = max(
+        settings.runner.market_poll_seconds,
+        settings.runner.news_poll_seconds,
+        settings.runner.propose_poll_seconds,
+    )
+    return (datetime.now(timezone.utc) - updated_at).total_seconds() <= max_interval * 3
+
+
+@app.post("/api/runner/start")
+async def runner_start_api(payload: RunnerStartRequest) -> dict:
+    global _RUNNER_THREAD, _RUNNER_INSTANCE
+    with _RUNNER_LOCK:
+        if _runner_running():
+            raise HTTPException(status_code=400, detail="runner already running")
+
+        settings = _load_settings()
+        if _runner_state_running(settings):
+            raise HTTPException(status_code=400, detail="runner already active (state file)")
+        if payload.strategy not in {"baseline", "news_overlay"}:
+            raise HTTPException(status_code=400, detail="invalid strategy")
+        if payload.mode not in {"paper", "live"}:
+            raise HTTPException(status_code=400, detail="invalid mode")
+
+        def _run() -> None:
+            global _RUNNER_INSTANCE
+            store = context.open_store(settings)
+            runner = Runner(
+                settings,
+                store,
+                propose_params=propose.ProposeParams(
+                    strategy=payload.strategy,
+                    mode=payload.mode,
+                    refresh=False,
+                ),
+            )
+            with _RUNNER_LOCK:
+                _RUNNER_INSTANCE = runner
+            try:
+                runner.run()
+            finally:
+                store.close()
+
+        thread = threading.Thread(target=_run, daemon=True)
+        _RUNNER_THREAD = thread
+        thread.start()
+
+    settings = _load_settings()
+    store = context.open_store(settings)
+    try:
+        store.log_event(
+            "runner_start",
+            {"strategy": payload.strategy, "mode": payload.mode},
+        )
+    finally:
+        store.close()
+    return {"status": "started"}
+
+
+@app.post("/api/runner/stop")
+async def runner_stop_api() -> dict:
+    global _RUNNER_THREAD, _RUNNER_INSTANCE
+    with _RUNNER_LOCK:
+        if not _runner_running():
+            return {"status": "not_running"}
+        if _RUNNER_INSTANCE:
+            _RUNNER_INSTANCE.request_stop()
+        thread = _RUNNER_THREAD
+    if thread:
+        thread.join(timeout=2)
+    settings = _load_settings()
+    store = context.open_store(settings)
+    try:
+        store.log_event("runner_stop", {})
+    finally:
+        store.close()
+    return {"status": "stopping"}
 
 
 @app.get("/api/watchlist")

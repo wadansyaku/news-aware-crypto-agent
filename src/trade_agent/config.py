@@ -81,6 +81,7 @@ class RiskConfig:
     max_loss_jpy_per_day: float
     max_orders_per_day: int
     cooldown_minutes: int
+    cooldown_bypass_pct: float
 
 
 @dataclass
@@ -205,7 +206,8 @@ DEFAULTS: dict[str, Any] = {
         "max_loss_jpy_per_trade": 5000,
         "max_loss_jpy_per_day": 15000,
         "max_orders_per_day": 5,
-        "cooldown_minutes": 15,
+        "cooldown_minutes": 5,
+        "cooldown_bypass_pct": 0.02,
     },
     "news": {
         "rss_urls": [],
@@ -496,6 +498,14 @@ def load_config(path: str) -> AppSettings:
                 "risk",
                 "cooldown_minutes",
                 default=DEFAULTS["risk"]["cooldown_minutes"],
+            )
+        ),
+        cooldown_bypass_pct=float(
+            _get(
+                merged,
+                "risk",
+                "cooldown_bypass_pct",
+                default=DEFAULTS["risk"]["cooldown_bypass_pct"],
             )
         ),
     )

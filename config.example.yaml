@@ -42,7 +42,8 @@ risk:
   max_loss_jpy_per_trade: 5000
   max_loss_jpy_per_day: 15000
   max_orders_per_day: 5
-  cooldown_minutes: 15
+  cooldown_minutes: 5
+  cooldown_bypass_pct: 0.02
 
 news:
   rss_urls:

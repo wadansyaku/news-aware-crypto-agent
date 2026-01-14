@@ -55,6 +55,8 @@ def get_status(settings: AppSettings) -> dict[str, Any]:
                 "capital_jpy": settings.risk.capital_jpy,
                 "max_loss_jpy_per_day": settings.risk.max_loss_jpy_per_day,
                 "max_orders_per_day": settings.risk.max_orders_per_day,
+                "cooldown_minutes": settings.risk.cooldown_minutes,
+                "cooldown_bypass_pct": settings.risk.cooldown_bypass_pct,
             },
         },
     }

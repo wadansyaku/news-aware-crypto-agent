@@ -159,12 +159,15 @@ function openSafetyModal() {
   const modal = $("safety-modal");
   if (!modal) return;
   const cfg = state.config || {};
+  const risk = cfg.risk || {};
   $("safety-mode").value = cfg.mode || "paper";
   $("safety-dry-run").value = String(cfg.dry_run ?? true);
   $("safety-require-approval").checked = Boolean(cfg.require_approval);
   $("safety-kill-switch").checked = Boolean(cfg.kill_switch);
   $("safety-autopilot").checked = Boolean(cfg.autopilot_enabled);
   $("safety-live-ack").checked = Boolean(cfg.i_understand_live_trading);
+  $("safety-cooldown-minutes").value = Number(risk.cooldown_minutes ?? 0);
+  $("safety-cooldown-bypass").value = Number((risk.cooldown_bypass_pct ?? 0) * 100);
   modal.classList.add("show");
   modal.setAttribute("aria-hidden", "false");
 }
@@ -178,6 +181,8 @@ function closeSafetyModal() {
 
 async function handleSafetySubmit(event) {
   event.preventDefault();
+  const cooldownMinutes = Number($("safety-cooldown-minutes").value);
+  const bypassPct = Number($("safety-cooldown-bypass").value);
   const payload = {
     mode: $("safety-mode").value,
     dry_run: $("safety-dry-run").value === "true",
@@ -185,6 +190,8 @@ async function handleSafetySubmit(event) {
     kill_switch: $("safety-kill-switch").checked,
     autopilot_enabled: $("safety-autopilot").checked,
     i_understand_live_trading: $("safety-live-ack").checked,
+    cooldown_minutes: Number.isNaN(cooldownMinutes) ? null : cooldownMinutes,
+    cooldown_bypass_pct: Number.isNaN(bypassPct) ? null : bypassPct / 100,
   };
   try {
     await apiRequest("/api/config/safety", {
@@ -203,15 +210,21 @@ function renderRunnerState(data) {
   const marketNode = $("runner-market-at");
   const newsNode = $("runner-news-at");
   const proposeNode = $("runner-propose-at");
+  const startBtn = $("runner-start");
+  const stopBtn = $("runner-stop");
   if (!stateNode || !marketNode || !newsNode || !proposeNode) return;
   if (!data || !data.exists) {
     stateNode.textContent = "未起動";
     marketNode.textContent = "-";
     newsNode.textContent = "-";
     proposeNode.textContent = "-";
+    if (startBtn) startBtn.disabled = false;
+    if (stopBtn) stopBtn.disabled = true;
     return;
   }
   stateNode.textContent = data.running ? "稼働中" : "停止中";
+  if (startBtn) startBtn.disabled = Boolean(data.running);
+  if (stopBtn) stopBtn.disabled = !data.running;
   const state = data.state || {};
   marketNode.textContent = formatIso(state.last_success_ingest_market_at);
   newsNode.textContent = formatIso(state.last_success_ingest_news_at);
@@ -222,6 +235,23 @@ async function loadRunnerState() {
   const data = await apiRequest("/api/runner/state");
   state.runner = data;
   renderRunnerState(data);
+}
+
+async function startRunner() {
+  const strategy = $("runner-strategy")?.value || "news_overlay";
+  const mode = state.config?.mode || "paper";
+  await apiRequest("/api/runner/start", {
+    method: "POST",
+    body: JSON.stringify({ strategy, mode }),
+  });
+  await loadRunnerState();
+  await loadAudit();
+}
+
+async function stopRunner() {
+  await apiRequest("/api/runner/stop", { method: "POST", body: JSON.stringify({}) });
+  await loadRunnerState();
+  await loadAudit();
 }
 
 function drawGauge(canvasId, value) {
@@ -552,11 +582,30 @@ function renderAuditList(logs) {
   }
   list.innerHTML = logs
     .map((log) => {
-      const summary = log.event === "risk_check"
-        ? `理由: ${log.data.reason || "-"}`
-        : log.event === "execute"
-        ? `結果: ${log.data.status || "-"}`
-        : "";
+      let summary = "";
+      if (log.event === "risk_check") {
+        summary = `理由: ${log.data.reason || "-"}`;
+      } else if (log.event === "execute") {
+        summary = `結果: ${log.data.status || "-"}`;
+      } else if (log.event === "config_update") {
+        const updates = log.data?.updates || {};
+        const labels = [];
+        if ("mode" in updates) labels.push(`mode=${updates.mode}`);
+        if ("dry_run" in updates) labels.push(`dry_run=${updates.dry_run}`);
+        if ("require_approval" in updates) labels.push(`approval=${updates.require_approval}`);
+        if ("kill_switch" in updates) labels.push(`kill_switch=${updates.kill_switch}`);
+        if ("autopilot_enabled" in updates) labels.push(`autopilot=${updates.autopilot_enabled}`);
+        if ("i_understand_live_trading" in updates)
+          labels.push(`live_ack=${updates.i_understand_live_trading}`);
+        if ("cooldown_minutes" in updates) labels.push(`cooldown=${updates.cooldown_minutes}m`);
+        if ("cooldown_bypass_pct" in updates)
+          labels.push(`bypass=${(updates.cooldown_bypass_pct * 100).toFixed(1)}%`);
+        summary = labels.length ? `安全設定: ${labels.join(", ")}` : "安全設定の更新";
+      } else if (log.event === "runner_start") {
+        summary = `開始: ${log.data.strategy || "-"} (${log.data.mode || "-"})`;
+      } else if (log.event === "runner_stop") {
+        summary = "停止";
+      }
       return `
         <div class="audit-item">
           <h4>${formatIso(log.ts)} / ${log.event}</h4>
@@ -579,6 +628,8 @@ function renderAuditTimeline(logs) {
     if (log.event === "approve") badge = "approve";
     if (log.event === "execute") badge = "execute";
     if (log.event === "risk_check" && log.data.status === "rejected") badge = "risk";
+    if (log.event === "config_update") badge = "config";
+    if (log.event === "runner_start" || log.event === "runner_stop") badge = "runner";
     return `
       <div class="timeline-item">
         <div>
@@ -1524,6 +1575,26 @@ async function init() {
     safetyModal.addEventListener("click", (event) => {
       const target = event.target;
       if (target?.dataset?.close) closeSafetyModal();
+    });
+  }
+  const runnerStart = $("runner-start");
+  if (runnerStart) {
+    runnerStart.addEventListener("click", async () => {
+      try {
+        await startRunner();
+      } catch (err) {
+        alert(`Runner起動に失敗: ${err.message}`);
+      }
+    });
+  }
+  const runnerStop = $("runner-stop");
+  if (runnerStop) {
+    runnerStop.addEventListener("click", async () => {
+      try {
+        await stopRunner();
+      } catch (err) {
+        alert(`Runner停止に失敗: ${err.message}`);
+      }
     });
   }
   $("quick-ingest").addEventListener("click", handleQuickIngest);

@@ -397,6 +397,17 @@ select {
   color: var(--muted);
 }
 
+.runner-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.runner-actions select {
+  min-width: 180px;
+}
+
 .runner-hint {
   font-size: 12px;
   color: var(--muted);
@@ -928,6 +939,14 @@ select {
 
 .badge.risk {
   background: #b42318;
+}
+
+.badge.config {
+  background: #64748b;
+}
+
+.badge.runner {
+  background: #0ea5e9;
 }
 
 .guide {
