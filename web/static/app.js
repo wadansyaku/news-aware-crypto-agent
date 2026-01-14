@@ -168,6 +168,7 @@ function openSafetyModal() {
   $("safety-live-ack").checked = Boolean(cfg.i_understand_live_trading);
   $("safety-cooldown-minutes").value = Number(risk.cooldown_minutes ?? 0);
   $("safety-cooldown-bypass").value = Number((risk.cooldown_bypass_pct ?? 0) * 100);
+  $("safety-daily-loss").value = Number(risk.max_loss_jpy_per_day ?? 0);
   modal.classList.add("show");
   modal.setAttribute("aria-hidden", "false");
 }
@@ -183,6 +184,7 @@ async function handleSafetySubmit(event) {
   event.preventDefault();
   const cooldownMinutes = Number($("safety-cooldown-minutes").value);
   const bypassPct = Number($("safety-cooldown-bypass").value);
+  const dailyLoss = Number($("safety-daily-loss").value);
   const payload = {
     mode: $("safety-mode").value,
     dry_run: $("safety-dry-run").value === "true",
@@ -192,6 +194,7 @@ async function handleSafetySubmit(event) {
     i_understand_live_trading: $("safety-live-ack").checked,
     cooldown_minutes: Number.isNaN(cooldownMinutes) ? null : cooldownMinutes,
     cooldown_bypass_pct: Number.isNaN(bypassPct) ? null : bypassPct / 100,
+    max_loss_jpy_per_day: Number.isNaN(dailyLoss) ? null : dailyLoss,
   };
   try {
     await apiRequest("/api/config/safety", {
@@ -600,6 +603,8 @@ function renderAuditList(logs) {
         if ("cooldown_minutes" in updates) labels.push(`cooldown=${updates.cooldown_minutes}m`);
         if ("cooldown_bypass_pct" in updates)
           labels.push(`bypass=${(updates.cooldown_bypass_pct * 100).toFixed(1)}%`);
+        if ("max_loss_jpy_per_day" in updates)
+          labels.push(`daily_loss=${currency.format(updates.max_loss_jpy_per_day)}`);
         summary = labels.length ? `安全設定: ${labels.join(", ")}` : "安全設定の更新";
       } else if (log.event === "runner_start") {
         summary = `開始: ${log.data.strategy || "-"} (${log.data.mode || "-"})`;

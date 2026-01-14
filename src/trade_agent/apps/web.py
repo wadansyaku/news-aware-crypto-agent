@@ -95,6 +95,7 @@ class SafetyUpdateRequest(BaseModel):
     i_understand_live_trading: Optional[bool] = None
     cooldown_minutes: Optional[int] = None
     cooldown_bypass_pct: Optional[float] = None
+    max_loss_jpy_per_day: Optional[float] = None
 
 
 class RunnerStartRequest(BaseModel):
@@ -165,6 +166,8 @@ async def safety_update_api(payload: SafetyUpdateRequest) -> dict:
         risk["cooldown_minutes"] = int(payload.cooldown_minutes)
     if payload.cooldown_bypass_pct is not None:
         risk["cooldown_bypass_pct"] = float(payload.cooldown_bypass_pct)
+    if payload.max_loss_jpy_per_day is not None:
+        risk["max_loss_jpy_per_day"] = float(payload.max_loss_jpy_per_day)
 
     save_raw_config(config_path, raw)
     settings = _load_settings()
