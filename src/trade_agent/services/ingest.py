@@ -18,6 +18,7 @@ class IngestParams:
     orderbook: bool = False
     news_only: bool = False
     features_only: bool = False
+    market_only: bool = False
 
 
 def _timeframe_ms(exchange_client: object, timeframe: str) -> int | None:
@@ -45,6 +46,8 @@ def _news_item_from_row(row: Any) -> NewsItem:
 def ingest(settings: AppSettings, store: SQLiteStore, params: IngestParams) -> dict[str, Any]:
     if params.news_only and params.features_only:
         raise ValueError("cannot use news_only and features_only together")
+    if params.market_only and (params.news_only or params.features_only):
+        raise ValueError("cannot combine market_only with news_only/features_only")
 
     exchange_client = build_exchange(settings.exchange)
     symbols = [params.symbol] if params.symbol else settings.trading.symbol_whitelist
@@ -52,7 +55,11 @@ def ingest(settings: AppSettings, store: SQLiteStore, params: IngestParams) -> d
     ingest_errors = []
     source = f"ccxt:{settings.exchange.name}"
 
-    if not (params.news_only or params.features_only):
+    do_market = params.market_only or not (params.news_only or params.features_only)
+    do_news = params.news_only or not (params.features_only or params.market_only)
+    do_features = params.features_only or not (params.news_only or params.market_only)
+
+    if do_market:
         for sym in symbols:
             for timeframe in settings.trading.timeframes:
                 since = None
@@ -86,7 +93,7 @@ def ingest(settings: AppSettings, store: SQLiteStore, params: IngestParams) -> d
                     ingest_errors.append({"symbol": sym, "orderbook": True, "error": str(exc)})
 
     news_stats: dict[str, Any] = {}
-    if not params.features_only and settings.news.rss_urls:
+    if do_news and settings.news.rss_urls:
         items, news_stats = ingest_rss(settings.news.rss_urls)
         inserted_total = 0
         feed_inserted: dict[str, int] = {}
@@ -99,7 +106,7 @@ def ingest(settings: AppSettings, store: SQLiteStore, params: IngestParams) -> d
             meta["inserted"] = feed_inserted.get(url, 0)
 
     features_added = 0
-    if not params.news_only:
+    if do_features:
         feature_version = "news_v1"
         articles = store.list_articles_without_features(feature_version=feature_version)
         for row in articles:

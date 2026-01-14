@@ -91,3 +91,13 @@ autopilot:
   min_confidence: 0.6
   symbol_whitelist:
     - "BTC/JPY"
+
+runner:
+  enabled: true
+  market_poll_seconds: 30
+  news_poll_seconds: 120
+  propose_poll_seconds: 60
+  propose_cooldown_seconds: 300
+  orderbook: false
+  jitter_seconds: 2
+  max_backoff_seconds: 300

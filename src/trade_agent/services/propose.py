@@ -22,6 +22,14 @@ class ProposeParams:
     refresh: bool = False
 
 
+@dataclass
+class ProposalCandidate:
+    status: str
+    plan: TradePlan | None
+    features_ref: str | None
+    reason: str | None = None
+
+
 def _recent_news(
     store: SQLiteStore, settings: AppSettings, as_of: datetime | None = None
 ) -> tuple[list[dict[str, float]], str, str]:
@@ -49,7 +57,9 @@ def _recent_news(
     return usable, start.isoformat(), now.isoformat()
 
 
-def propose(settings: AppSettings, store: SQLiteStore, params: ProposeParams) -> dict[str, Any]:
+def prepare_proposal(
+    settings: AppSettings, store: SQLiteStore, params: ProposeParams
+) -> ProposalCandidate:
     if params.strategy not in {"baseline", "news_overlay"}:
         raise ValueError("invalid strategy")
     if params.mode not in {"paper", "live"}:
@@ -148,15 +158,39 @@ def propose(settings: AppSettings, store: SQLiteStore, params: ProposeParams) ->
 
     if not risk_result.approved or not risk_result.plan:
         if risk_result.plan and risk_result.plan.side == "hold":
-            return {"status": "hold", "reason": risk_result.reason, "rationale": risk_result.plan.rationale}
-        return {"status": "rejected", "reason": risk_result.reason}
+            return ProposalCandidate(
+                status="hold",
+                plan=risk_result.plan,
+                features_ref=features_ref,
+                reason=risk_result.reason,
+            )
+        return ProposalCandidate(
+            status="rejected", plan=None, features_ref=features_ref, reason=risk_result.reason
+        )
 
-    plan = risk_result.plan
+    return ProposalCandidate(status="proposed", plan=risk_result.plan, features_ref=features_ref)
+
+
+def finalize_proposal(
+    settings: AppSettings,
+    store: SQLiteStore,
+    candidate: ProposalCandidate,
+    params: ProposeParams,
+) -> dict[str, Any]:
+    if candidate.status != "proposed" or not candidate.plan:
+        if candidate.status == "hold" and candidate.plan:
+            return {
+                "status": "hold",
+                "reason": candidate.reason,
+                "rationale": candidate.plan.rationale,
+            }
+        return {"status": "rejected", "reason": candidate.reason}
+
     intent = from_plan(
-        plan,
+        candidate.plan,
         mode=params.mode,
         expiry_seconds=settings.trading.intent_expiry_seconds,
-        rationale_features_ref=features_ref,
+        rationale_features_ref=candidate.features_ref,
     )
     store.save_order_intent(intent)
     store.log_event(
@@ -173,6 +207,11 @@ def propose(settings: AppSettings, store: SQLiteStore, params: ProposeParams) ->
         "strategy": intent.strategy,
         "confidence": intent.confidence,
         "rationale": intent.rationale,
-        "features_ref": features_ref,
+        "features_ref": candidate.features_ref,
         "expires_at": intent.expires_at,
     }
+
+
+def propose(settings: AppSettings, store: SQLiteStore, params: ProposeParams) -> dict[str, Any]:
+    candidate = prepare_proposal(settings, store, params)
+    return finalize_proposal(settings, store, candidate, params)

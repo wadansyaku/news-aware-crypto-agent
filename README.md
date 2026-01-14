@@ -32,6 +32,7 @@ uv run trade-agent propose --strategy news_overlay
 uv run trade-agent approve <intent_id>
 uv run trade-agent approve-execute <intent_id> --mode paper
 uv run trade-agent execute --mode paper
+uv run trade-agent run --strategy news_overlay
 uv run trade-agent backtest --from 2024-01-01 --to 2024-02-01
 uv run trade-agent report
 ```
@@ -57,6 +58,7 @@ uv run streamlit run legacy/streamlit_app.py
 - `propose` : Generate a Trade Plan and store an Order Intent.
 - `approve <intent_id>` : Approve with the configured phrase.
 - `execute` : Execute approved intents in paper or live mode.
+- `run` : Run a real-time loop that ingests + proposes continuously (no auto-execute).
 - `backtest` : Run on stored candles/news with latency.
 - `report` : Save metrics and equity curve to `data/reports/`.
 

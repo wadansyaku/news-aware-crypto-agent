@@ -140,6 +140,18 @@ class AutopilotConfig:
 
 
 @dataclass
+class RunnerConfig:
+    enabled: bool
+    market_poll_seconds: int
+    news_poll_seconds: int
+    propose_poll_seconds: int
+    propose_cooldown_seconds: int
+    orderbook: bool
+    jitter_seconds: int
+    max_backoff_seconds: int
+
+
+@dataclass
 class AppSettings:
     app: AppConfig
     exchange: ExchangeConfig
@@ -150,6 +162,7 @@ class AppSettings:
     paper: PaperConfig
     backtest: BacktestConfig
     autopilot: AutopilotConfig
+    runner: RunnerConfig
 
 
 DEFAULTS: dict[str, Any] = {
@@ -234,6 +247,16 @@ DEFAULTS: dict[str, Any] = {
         "max_loss_jpy_per_trade": 2000,
         "min_confidence": 0.6,
         "symbol_whitelist": ["BTC/JPY"],
+    },
+    "runner": {
+        "enabled": True,
+        "market_poll_seconds": 30,
+        "news_poll_seconds": 120,
+        "propose_poll_seconds": 60,
+        "propose_cooldown_seconds": 300,
+        "orderbook": False,
+        "jitter_seconds": 2,
+        "max_backoff_seconds": 300,
     },
 }
 
@@ -654,6 +677,66 @@ def load_config(path: str) -> AppSettings:
         ),
     )
 
+    runner = RunnerConfig(
+        enabled=bool(_get(merged, "runner", "enabled", default=DEFAULTS["runner"]["enabled"])),
+        market_poll_seconds=int(
+            _get(
+                merged,
+                "runner",
+                "market_poll_seconds",
+                default=DEFAULTS["runner"]["market_poll_seconds"],
+            )
+        ),
+        news_poll_seconds=int(
+            _get(
+                merged,
+                "runner",
+                "news_poll_seconds",
+                default=DEFAULTS["runner"]["news_poll_seconds"],
+            )
+        ),
+        propose_poll_seconds=int(
+            _get(
+                merged,
+                "runner",
+                "propose_poll_seconds",
+                default=DEFAULTS["runner"]["propose_poll_seconds"],
+            )
+        ),
+        propose_cooldown_seconds=int(
+            _get(
+                merged,
+                "runner",
+                "propose_cooldown_seconds",
+                default=DEFAULTS["runner"]["propose_cooldown_seconds"],
+            )
+        ),
+        orderbook=bool(
+            _get(
+                merged,
+                "runner",
+                "orderbook",
+                default=DEFAULTS["runner"]["orderbook"],
+            )
+        ),
+        jitter_seconds=int(
+            _get(
+                merged,
+                "runner",
+                "jitter_seconds",
+                default=DEFAULTS["runner"]["jitter_seconds"],
+            )
+        ),
+        max_backoff_seconds=int(
+            _get(
+                merged,
+                "runner",
+                "max_backoff_seconds",
+                default=DEFAULTS["runner"]["max_backoff_seconds"],
+            )
+        ),
+    )
+
     return AppSettings(
         app=app,
         exchange=exchange,
@@ -664,6 +747,7 @@ def load_config(path: str) -> AppSettings:
         paper=paper,
         backtest=backtest,
         autopilot=autopilot,
+        runner=runner,
     )
 
 
