@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
-import sqlite3
 
-from trade_agent import db
 from trade_agent.config import AppSettings, load_config, resolve_db_path
 from trade_agent.executor import execute_intent
 from trade_agent.intent import TradePlan, from_plan
+from trade_agent.store import SQLiteStore
 
 
 def _make_settings(tmp_path: Path, trading_yaml: str) -> AppSettings:
@@ -24,7 +23,7 @@ trading:
     return load_config(str(config_path))
 
 
-def _insert_intent(conn: sqlite3.Connection) -> str:
+def _insert_intent(store: SQLiteStore) -> str:
     plan = TradePlan(
         symbol="BTC/JPY",
         side="buy",
@@ -35,7 +34,7 @@ def _insert_intent(conn: sqlite3.Connection) -> str:
         strategy="baseline",
     )
     intent = from_plan(plan, mode="live", expiry_seconds=300)
-    db.insert_order_intent(conn, intent.as_record())
+    store.save_order_intent(intent)
     return intent.intent_id
 
 
@@ -48,14 +47,14 @@ def test_live_rejects_when_dry_run(monkeypatch, tmp_path: Path) -> None:
   i_understand_live_trading: true
 """,
     )
-    conn = db.connect(resolve_db_path(settings))
-    db.init_db(conn)
-    intent_id = _insert_intent(conn)
+    store = SQLiteStore(resolve_db_path(settings))
+    intent_id = _insert_intent(store)
 
     monkeypatch.setenv("I_UNDERSTAND_LIVE_TRADING", "true")
-    result = execute_intent(conn, intent_id, settings, mode="live")
+    result = execute_intent(store, intent_id, settings, mode="live")
     assert result.status == "rejected"
     assert result.message == "dry_run enabled"
+    store.close()
 
 
 def test_live_requires_double_consent(monkeypatch, tmp_path: Path) -> None:
@@ -67,14 +66,14 @@ def test_live_requires_double_consent(monkeypatch, tmp_path: Path) -> None:
   i_understand_live_trading: true
 """,
     )
-    conn = db.connect(resolve_db_path(settings))
-    db.init_db(conn)
-    intent_id = _insert_intent(conn)
+    store = SQLiteStore(resolve_db_path(settings))
+    intent_id = _insert_intent(store)
 
     monkeypatch.delenv("I_UNDERSTAND_LIVE_TRADING", raising=False)
-    result = execute_intent(conn, intent_id, settings, mode="live")
+    result = execute_intent(store, intent_id, settings, mode="live")
     assert result.status == "rejected"
     assert result.message == "live trading not acknowledged"
+    store.close()
 
 
 def test_live_rejects_missing_credentials(monkeypatch, tmp_path: Path) -> None:
@@ -86,14 +85,14 @@ def test_live_rejects_missing_credentials(monkeypatch, tmp_path: Path) -> None:
   i_understand_live_trading: true
 """,
     )
-    conn = db.connect(resolve_db_path(settings))
-    db.init_db(conn)
-    intent_id = _insert_intent(conn)
+    store = SQLiteStore(resolve_db_path(settings))
+    intent_id = _insert_intent(store)
 
     monkeypatch.setenv("I_UNDERSTAND_LIVE_TRADING", "true")
     monkeypatch.delenv(settings.exchange.api_key_env, raising=False)
     monkeypatch.delenv(settings.exchange.api_secret_env, raising=False)
 
-    result = execute_intent(conn, intent_id, settings, mode="live")
+    result = execute_intent(store, intent_id, settings, mode="live")
     assert result.status == "rejected"
     assert result.message == "missing API credentials"
+    store.close()

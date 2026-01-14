@@ -1,0 +1,594 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>News-aware Crypto Agent</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+    <script defer src="/static/app.js"></script>
+  </head>
+  <body>
+    <div class="bg">
+      <div class="glow glow-a"></div>
+      <div class="glow glow-b"></div>
+      <div class="grain"></div>
+    </div>
+
+    <header class="hero">
+      <div class="hero-top">
+        <div class="brand">
+          <span class="brand-mark">NCA</span>
+          <span class="brand-text">News-aware Crypto Agent</span>
+        </div>
+        <nav class="hero-nav">
+          <a href="#overview">概要</a>
+          <a href="#watchlist">ウォッチ</a>
+          <a href="#ingest">取り込み</a>
+          <a href="#plan">提案</a>
+          <a href="#approval">承認</a>
+          <a href="#execute">実行</a>
+          <a href="#report">レポート</a>
+          <a href="#backtest">バックテスト</a>
+          <a href="#news">ニュース</a>
+          <a href="#audit">監査</a>
+        </nav>
+      </div>
+      <div class="hero-body">
+        <div class="hero-copy">
+          <h1>ニュースと価格を、安全に検証して取引へ。</h1>
+          <p>
+            これは研究・検証向けのローカルファーストMVPです。利益を保証しません。必ず
+            <strong>承認フロー</strong>を経てから実行されます。
+          </p>
+          <div class="hero-actions">
+            <button class="btn btn-primary" id="refresh-status">ステータス更新</button>
+            <button class="btn btn-ghost" id="quick-ingest">今すぐ取り込み</button>
+          </div>
+          <div class="status-strip">
+            <div class="status-pill" id="status-exchange">取引所: 取得中</div>
+            <div class="status-pill" id="status-news">ニュース: 取得中</div>
+            <div class="status-pill" id="status-db">DB: 取得中</div>
+          </div>
+        </div>
+        <div class="hero-panel">
+          <div class="panel-card">
+            <div class="panel-title">安全モード</div>
+            <div class="panel-grid">
+              <div>
+                <span class="label">モード</span>
+                <strong id="cfg-mode">-</strong>
+              </div>
+              <div>
+                <span class="label">承認</span>
+                <strong id="cfg-approval">-</strong>
+              </div>
+              <div>
+                <span class="label">自動執行</span>
+                <strong id="cfg-autopilot">-</strong>
+              </div>
+              <div>
+                <span class="label">Kill Switch</span>
+                <strong id="cfg-kill">-</strong>
+              </div>
+            </div>
+            <div class="panel-foot">
+              <span class="label">日次損失上限</span>
+              <strong id="cfg-daily-loss">-</strong>
+            </div>
+          </div>
+          <div class="panel-card">
+            <div class="panel-title">現在ポジション</div>
+            <div class="panel-grid">
+              <div>
+                <span class="label">シンボル</span>
+                <strong id="pos-symbol">-</strong>
+              </div>
+              <div>
+                <span class="label">数量</span>
+                <strong id="pos-size">-</strong>
+              </div>
+              <div>
+                <span class="label">平均価格</span>
+                <strong id="pos-avg">-</strong>
+              </div>
+              <div>
+                <span class="label">現在価格</span>
+                <strong id="pos-current">-</strong>
+              </div>
+              <div>
+                <span class="label">未実現PnL</span>
+                <strong id="pos-unrealized">-</strong>
+              </div>
+              <div>
+                <span class="label">損益率</span>
+                <strong id="pos-return">-</strong>
+              </div>
+              <div>
+                <span class="label">保有期間</span>
+                <strong id="pos-hold">-</strong>
+              </div>
+              <div>
+                <span class="label">最終更新</span>
+                <strong id="pos-price-ts">-</strong>
+              </div>
+            </div>
+            <div class="panel-foot">
+              <div class="compare">
+                <span class="label">Avg vs Now</span>
+                <div class="compare-bar">
+                  <div class="compare-fill" id="pos-compare"></div>
+                </div>
+              </div>
+              <div class="gauge">
+                <canvas id="risk-gauge" height="90"></canvas>
+                <span class="label">エクスポージャー</span>
+                <strong id="pos-exposure">-</strong>
+              </div>
+            </div>
+            <div class="panel-actions">
+              <button class="btn btn-ghost" id="close-position">全ポジション解消</button>
+            </div>
+            <div class="panel-subtle" id="pos-message"></div>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="grid">
+      <section class="card" id="overview" data-step="0">
+        <div class="card-head">
+          <h2>クイック概要</h2>
+          <p>ここから現在の状態を把握し、次のアクションへ。</p>
+        </div>
+        <div class="stat-grid">
+          <div class="stat">
+            <span class="label">取引所</span>
+            <strong id="cfg-exchange">-</strong>
+          </div>
+          <div class="stat">
+            <span class="label">対象シンボル</span>
+            <strong id="cfg-symbols">-</strong>
+          </div>
+          <div class="stat">
+            <span class="label">足種</span>
+            <strong id="cfg-timeframes">-</strong>
+          </div>
+          <div class="stat">
+            <span class="label">承認フレーズ</span>
+            <div class="inline">
+              <strong id="cfg-phrase">非表示</strong>
+              <button class="link" id="show-phrase">表示</button>
+            </div>
+          </div>
+        </div>
+        <div class="divider"></div>
+        <div class="mini-list" id="intents-preview"></div>
+      </section>
+
+      <section class="card" id="watchlist" data-step="1">
+        <div class="card-head">
+          <h2>ウォッチリストとアラート</h2>
+          <p>複数シンボルの価格を監視し、条件で通知します。</p>
+        </div>
+        <div class="watchlist-grid">
+          <div class="watchlist-panel">
+            <div class="panel-head">
+              <div>
+                <h3>ウォッチリスト</h3>
+                <span class="label">最新価格と変動率</span>
+              </div>
+              <button class="btn btn-ghost" id="watchlist-refresh">更新</button>
+            </div>
+            <div class="table-wrap">
+              <table class="table" id="watchlist-table">
+                <thead>
+                  <tr>
+                    <th>シンボル</th>
+                    <th>現在価格</th>
+                    <th>変動率</th>
+                    <th>更新</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="watchlist-panel">
+            <div class="panel-head">
+              <div>
+                <h3>価格アラート</h3>
+                <span class="label">条件に一致すると通知します</span>
+              </div>
+              <div class="panel-actions">
+                <button class="btn btn-primary" id="open-alert-modal">アラート追加</button>
+                <button class="btn btn-ghost" id="enable-notify">通知を有効化</button>
+              </div>
+            </div>
+            <div class="panel-subline">
+              <span class="label" id="notify-status">通知: 未許可</span>
+            </div>
+            <div class="alert-list" id="alerts-list"></div>
+            <div class="output" id="alert-output"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card" id="ingest" data-step="2">
+        <div class="card-head">
+          <h2>2. データ取り込み</h2>
+          <p>市場価格とニュースを最新化します。</p>
+        </div>
+        <form id="ingest-form" class="form">
+          <div class="form-grid">
+            <label>
+              <span>対象シンボル</span>
+              <input type="text" id="ingest-symbol" placeholder="BTC/JPY" />
+            </label>
+            <label class="checkbox">
+              <input type="checkbox" id="ingest-orderbook" />
+              <span>板情報も取得する</span>
+            </label>
+            <label class="checkbox">
+              <input type="checkbox" id="ingest-news-only" />
+              <span>ニュースのみ</span>
+            </label>
+            <label class="checkbox">
+              <input type="checkbox" id="ingest-features-only" />
+              <span>特徴量のみ</span>
+            </label>
+          </div>
+          <button class="btn btn-primary" type="submit">取り込み開始</button>
+        </form>
+        <div class="output" id="ingest-output"></div>
+      </section>
+
+      <section class="card" id="plan" data-step="3">
+        <div class="card-head">
+          <h2>3. 取引提案</h2>
+          <p>戦略からトレードプランを生成します。</p>
+        </div>
+        <form id="propose-form" class="form">
+          <div class="form-grid">
+            <label>
+              <span>戦略</span>
+              <select id="propose-strategy">
+                <option value="baseline">価格のみ（baseline）</option>
+                <option value="news_overlay">ニュース重視（overlay）</option>
+              </select>
+            </label>
+            <label>
+              <span>モード</span>
+              <select id="propose-mode">
+                <option value="paper">ペーパー</option>
+                <option value="live">ライブ</option>
+              </select>
+            </label>
+            <label>
+              <span>対象シンボル</span>
+              <input type="text" id="propose-symbol" placeholder="BTC/JPY" />
+            </label>
+            <label class="checkbox">
+              <input type="checkbox" id="propose-refresh" />
+              <span>直近のローソクも更新</span>
+            </label>
+          </div>
+          <button class="btn btn-primary" type="submit">提案を作成</button>
+        </form>
+        <div class="output" id="propose-output"></div>
+      </section>
+
+      <section class="card" id="approval" data-step="4">
+        <div class="card-head">
+          <h2>4. 承認</h2>
+          <p>提案された取引を確認し、承認フレーズで許可します。</p>
+        </div>
+        <div class="table-wrap">
+          <table class="table" id="intents-table">
+            <thead>
+              <tr>
+                <th>日時</th>
+                <th>シンボル</th>
+                <th>方向</th>
+                <th>サイズ</th>
+                <th>価格</th>
+                <th>状態</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <form id="approve-form" class="form">
+          <div class="form-grid">
+            <label>
+              <span>Intent ID</span>
+              <input type="text" id="approve-intent" placeholder="最新の提案IDを入力" />
+            </label>
+            <label>
+              <span>承認フレーズ</span>
+              <input type="password" id="approve-phrase" placeholder="I APPROVE" />
+            </label>
+            <label>
+              <span>実行モード</span>
+              <select id="approve-execute-mode">
+                <option value="paper">ペーパー</option>
+                <option value="live">ライブ</option>
+              </select>
+            </label>
+          </div>
+          <div class="form-actions">
+            <button class="btn btn-primary" type="submit" data-action="approve">承認する</button>
+            <button class="btn btn-ghost" type="submit" data-action="approve-execute">承認して実行</button>
+          </div>
+        </form>
+        <div class="output" id="approve-output"></div>
+      </section>
+
+      <section class="card" id="execute" data-step="5">
+        <div class="card-head">
+          <h2>5. 実行</h2>
+          <p>承認済みの取引を実行します（デフォルトはペーパー）。</p>
+        </div>
+        <form id="execute-form" class="form">
+          <div class="form-grid">
+            <label>
+              <span>Intent ID（任意）</span>
+              <input type="text" id="execute-intent" placeholder="未入力なら最新" />
+            </label>
+            <label>
+              <span>モード</span>
+              <select id="execute-mode">
+                <option value="paper">ペーパー</option>
+                <option value="live">ライブ</option>
+              </select>
+            </label>
+          </div>
+          <button class="btn btn-primary" type="submit">実行する</button>
+        </form>
+        <div class="output" id="execute-output"></div>
+      </section>
+
+      <section class="card" id="report" data-step="6">
+        <div class="card-head">
+          <h2>6. レポート & PnL</h2>
+          <p>成績の推移を視覚的に確認します。</p>
+        </div>
+        <form id="report-form" class="form">
+          <div class="form-grid">
+            <label>
+              <span>対象モード</span>
+              <select id="report-mode">
+                <option value="">すべて</option>
+                <option value="paper">ペーパー</option>
+                <option value="live">ライブ</option>
+              </select>
+            </label>
+          </div>
+          <div class="form-actions">
+            <button class="btn btn-primary" type="submit">レポートを生成</button>
+            <button class="btn btn-ghost" type="button" id="refresh-analytics">最新を表示</button>
+          </div>
+        </form>
+        <div class="output" id="report-output"></div>
+        <div class="metrics" id="metrics-grid"></div>
+        <div class="chart-card">
+          <canvas id="equity-chart" height="180"></canvas>
+        </div>
+        <div class="table-wrap">
+          <table class="table" id="trades-table">
+            <thead>
+              <tr>
+                <th>日時</th>
+                <th>モード</th>
+                <th>シンボル</th>
+                <th>方向</th>
+                <th>サイズ</th>
+                <th>価格</th>
+                <th>PnL</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="card" id="backtest" data-step="7">
+        <div class="card-head">
+          <h2>バックテストダッシュボード</h2>
+          <p>過去データでの戦略パフォーマンスを可視化します。</p>
+        </div>
+        <form id="backtest-form" class="form">
+          <div class="form-grid">
+            <label>
+              <span>開始日</span>
+              <input type="date" id="backtest-start" />
+            </label>
+            <label>
+              <span>終了日</span>
+              <input type="date" id="backtest-end" />
+            </label>
+            <label>
+              <span>戦略</span>
+              <select id="backtest-strategy">
+                <option value="baseline">価格のみ（baseline）</option>
+                <option value="news_overlay">ニュース重視（overlay）</option>
+              </select>
+            </label>
+            <label>
+              <span>シンボル</span>
+              <input type="text" id="backtest-symbol" placeholder="BTC/JPY" />
+            </label>
+          </div>
+          <div class="form-actions">
+            <button class="btn btn-primary" type="submit">バックテスト実行</button>
+            <button class="btn btn-ghost" type="button" id="refresh-backtest-results">履歴更新</button>
+          </div>
+        </form>
+        <div class="output" id="backtest-output"></div>
+        <div class="backtest-history" id="backtest-history"></div>
+        <div class="metrics" id="backtest-metrics"></div>
+        <div class="chart-card">
+          <canvas id="backtest-equity-chart" height="200"></canvas>
+        </div>
+        <div class="heatmap-card">
+          <div class="heatmap-head">
+            <strong>月別リターン</strong>
+            <span class="label">色が濃いほどPnLが大きい</span>
+          </div>
+          <div class="heatmap" id="backtest-heatmap"></div>
+        </div>
+        <div class="table-tools">
+          <input type="search" id="backtest-filter" placeholder="フィルタ: side, pnl, 日付" />
+          <select id="backtest-sort">
+            <option value="date_desc">新しい順</option>
+            <option value="date_asc">古い順</option>
+            <option value="pnl_desc">PnL 大きい順</option>
+            <option value="pnl_asc">PnL 小さい順</option>
+          </select>
+        </div>
+        <div class="table-wrap">
+          <table class="table" id="backtest-trades-table">
+            <thead>
+              <tr>
+                <th>日時</th>
+                <th>シンボル</th>
+                <th>方向</th>
+                <th>サイズ</th>
+                <th>価格</th>
+                <th>PnL</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="card" id="news" data-step="8">
+        <div class="card-head">
+          <h2>News Insights</h2>
+          <p>ニュースセンチメントとキーワードを可視化します。</p>
+        </div>
+        <div class="news-grid">
+          <div class="news-panel">
+            <h3>最新ニュース</h3>
+            <div class="news-list" id="news-list"></div>
+          </div>
+          <div class="news-panel">
+            <h3>センチメント推移（24h）</h3>
+            <canvas id="news-sentiment-chart" height="160"></canvas>
+          </div>
+          <div class="news-panel">
+            <h3>キーワードクラウド</h3>
+            <div class="tag-cloud" id="news-keywords"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card" id="audit" data-step="9">
+        <div class="card-head">
+          <h2>監査ログ</h2>
+          <p>risk_check など重要な判断理由を分析できます。</p>
+        </div>
+        <div class="audit-summary" id="audit-summary"></div>
+        <div class="audit-controls">
+          <label>
+            <span>イベント種別</span>
+            <div class="chip-group" id="audit-event-chips">
+              <label class="chip"><input type="checkbox" value="risk_check" checked />risk_check</label>
+              <label class="chip"><input type="checkbox" value="propose" checked />propose</label>
+              <label class="chip"><input type="checkbox" value="approve" checked />approve</label>
+              <label class="chip"><input type="checkbox" value="approve_execute" checked />approve_execute</label>
+              <label class="chip"><input type="checkbox" value="execute" checked />execute</label>
+              <label class="chip"><input type="checkbox" value="ingest" />ingest</label>
+              <label class="chip"><input type="checkbox" value="backtest" />backtest</label>
+              <label class="chip"><input type="checkbox" value="report" />report</label>
+            </div>
+          </label>
+          <label>
+            <span>開始日</span>
+            <input type="date" id="audit-start" />
+          </label>
+          <label>
+            <span>終了日</span>
+            <input type="date" id="audit-end" />
+          </label>
+          <label>
+            <span>Intent ID</span>
+            <input type="text" id="audit-intent" placeholder="intent_id で絞り込み" />
+          </label>
+          <div class="form-actions">
+            <button class="btn btn-ghost" id="refresh-audit">更新</button>
+            <button class="btn btn-ghost" id="export-audit-json">JSON出力</button>
+            <button class="btn btn-ghost" id="export-audit-csv">CSV出力</button>
+          </div>
+        </div>
+        <div class="timeline" id="audit-timeline"></div>
+        <div class="audit-list" id="audit-list"></div>
+      </section>
+
+      <section class="card" id="guide" data-step="10">
+        <div class="card-head">
+          <h2>取引所切替の簡易ガイド</h2>
+          <p>スポット対応・ローソク取得可否を基準に選択してください。</p>
+        </div>
+        <div class="guide">
+          <div>
+            <h3>おすすめ候補</h3>
+            <ul>
+              <li>bitflyer（現状のデフォルト、JPY対応）</li>
+              <li>bitbank（JPY対応、板情報が安定しやすい）</li>
+              <li>GMOコイン（JPY対応、要CCXT対応確認）</li>
+            </ul>
+          </div>
+          <div>
+            <h3>切替手順</h3>
+            <ol>
+              <li><code>config.yaml</code>の <strong>exchange.name</strong> を変更</li>
+              <li>APIキーの環境変数名を合わせる</li>
+              <li>ステータス画面で接続確認</li>
+              <li>取り込み → 提案 → 承認 → 実行の順で確認</li>
+            </ol>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <div class="modal" id="alert-modal" aria-hidden="true">
+      <div class="modal-backdrop" data-close="true"></div>
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="alert-modal-title">
+        <div class="modal-head">
+          <h3 id="alert-modal-title">アラート追加</h3>
+          <button class="icon-button" type="button" data-close="true">×</button>
+        </div>
+        <form id="alert-form" class="form">
+          <div class="form-grid">
+            <label>
+              <span>シンボル</span>
+              <select id="alert-symbol"></select>
+            </label>
+            <label>
+              <span>条件</span>
+              <select id="alert-condition">
+                <option value="above">価格が指定値以上</option>
+                <option value="below">価格が指定値以下</option>
+                <option value="change_pct">変動率が指定値以上</option>
+              </select>
+            </label>
+            <label>
+              <span>しきい値</span>
+              <input type="number" id="alert-threshold" placeholder="価格 or 変動率(%)" step="0.1" />
+            </label>
+          </div>
+          <div class="hint" id="alert-hint">変動率は % 指定です（例: 1.5）</div>
+          <div class="modal-actions">
+            <button class="btn btn-ghost" type="button" data-close="true">キャンセル</button>
+            <button class="btn btn-primary" type="submit">追加する</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <footer class="footer">
+      <p>このUIはローカルで動作します。実運用の前に必ずペーパー検証を行ってください。</p>
+    </footer>
+  </body>
+</html>

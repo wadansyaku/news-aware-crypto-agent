@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from trade_agent import db
 from trade_agent.config import MakerEmulationConfig, RiskConfig, TradingConfig
 from trade_agent.intent import TradePlan
 from trade_agent.risk import evaluate_plan
+from trade_agent.store import SQLiteStore
 
 
 def _make_trading(kill_switch: bool) -> TradingConfig:
@@ -27,8 +27,7 @@ def _make_trading(kill_switch: bool) -> TradingConfig:
 
 
 def test_kill_switch_blocks() -> None:
-    conn = db.connect(":memory:")
-    db.init_db(conn)
+    store = SQLiteStore(":memory:")
     risk = RiskConfig(
         capital_jpy=100000,
         max_position_pct=1.0,
@@ -47,14 +46,13 @@ def test_kill_switch_blocks() -> None:
         rationale="test",
         strategy="baseline",
     )
-    result = evaluate_plan(conn, plan, risk, _make_trading(kill_switch=True))
+    result = evaluate_plan(store, plan, risk, _make_trading(kill_switch=True))
     assert not result.approved
     assert result.reason == "kill switch enabled"
 
 
 def test_notional_cap_adjusts_size() -> None:
-    conn = db.connect(":memory:")
-    db.init_db(conn)
+    store = SQLiteStore(":memory:")
     risk = RiskConfig(
         capital_jpy=100000,
         max_position_pct=1.0,
@@ -73,7 +71,7 @@ def test_notional_cap_adjusts_size() -> None:
         rationale="test",
         strategy="baseline",
     )
-    result = evaluate_plan(conn, plan, risk, _make_trading(kill_switch=False))
+    result = evaluate_plan(store, plan, risk, _make_trading(kill_switch=False))
     assert result.approved
     assert result.plan is not None
     assert result.plan.size == 4.0

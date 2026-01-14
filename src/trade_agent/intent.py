@@ -47,6 +47,7 @@ class OrderIntent:
     strategy: str
     confidence: float
     rationale: str
+    rationale_features_ref: str | None
     expires_at: str
     mode: str
 
@@ -63,6 +64,7 @@ class OrderIntent:
             "strategy": self.strategy,
             "confidence": self.confidence,
             "rationale": self.rationale,
+            "rationale_features_ref": self.rationale_features_ref,
             "expires_at": self.expires_at,
             "mode": self.mode,
         }
@@ -84,15 +86,20 @@ class OrderIntent:
             "strategy": self.strategy,
             "symbol": self.symbol,
             "side": self.side,
+            "order_type": self.order_type,
+            "time_in_force": self.time_in_force,
             "size": self.size,
             "price": self.price,
             "confidence": self.confidence,
             "rationale": self.rationale,
+            "rationale_features_ref": self.rationale_features_ref,
             "mode": self.mode,
         }
 
 
-def from_plan(plan: TradePlan, mode: str, expiry_seconds: int) -> OrderIntent:
+def from_plan(
+    plan: TradePlan, mode: str, expiry_seconds: int, rationale_features_ref: str | None = None
+) -> OrderIntent:
     now = _utc_now()
     return OrderIntent(
         intent_id=str(uuid.uuid4()),
@@ -106,6 +113,7 @@ def from_plan(plan: TradePlan, mode: str, expiry_seconds: int) -> OrderIntent:
         strategy=plan.strategy,
         confidence=float(plan.confidence),
         rationale=plan.rationale,
+        rationale_features_ref=rationale_features_ref,
         expires_at=(now + timedelta(seconds=expiry_seconds)).isoformat(),
         mode=mode,
     )

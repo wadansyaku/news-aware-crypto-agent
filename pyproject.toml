@@ -22,9 +22,14 @@ dev = [
 ui = [
   "streamlit>=1.36.0",
 ]
+web = [
+  "fastapi>=0.112.0",
+  "uvicorn>=0.30.0",
+]
 
 [project.scripts]
-trade-agent = "trade_agent.main:app"
+trade-agent = "trade_agent.apps.cli:app"
+trade-agent-web = "trade_agent.apps.web:main"
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

@@ -47,30 +47,38 @@
   - Maker emulation uses configurable `trading.maker_emulation` settings.
 - `src/trade_agent/backtest.py`: Candle + news latency backtest. **Implemented**.
 - `src/trade_agent/metrics.py`: PnL metrics + reports. **Implemented**.
-- `streamlit_app.py`: Optional UI for the same flows. **Implemented**.
+- `src/trade_agent/apps/cli.py`: CLI entrypoint (status/ingest/propose/approve/execute/backtest/report). **Implemented**.
+- `src/trade_agent/apps/web.py`: FastAPI Web UI backend + static asset serving. **Implemented**.
+- `src/trade_agent/services/`: Shared service layer for CLI/Web (ingest/propose/approve/execute/report). **Implemented**.
+- `legacy/streamlit_app.py`: Legacy Streamlit UI (optional). **Implemented**.
 
 ## Data model / storage approach (SQLite)
-- `candles`: OHLCV per `symbol`, `timeframe`, `ts`.
+- `candles`: OHLCV per `symbol`, `timeframe`, `ts` + `source`, `ingested_at`.
 - `orderbook_snapshots`: best bid/ask snapshots for paper fill simulation.
-- `news_articles`: normalized RSS entries, dedup by `url` and `title_hash`.
-- `news_features`: sentiment/keywords/source weight per article.
-- `order_intents`: proposed/approved/expired intents with canonical JSON + hash.
-- `approvals`: stored approval hash + timestamp.
-- `executions`: execution attempts (paper/live) with status and details.
+- `news_articles`: normalized RSS entries with `guid`, `summary`, `published_at`, `observed_at`, `raw_payload_hash`; dedup by `url` and `title_hash`.
+- `news_features`: sentiment/keywords/source weight per article + `feature_version`.
+- `feature_rows`: aggregated feature vectors per `symbol` and `ts`, with `news_window_start/end`.
+- `order_intents`: proposed/approved/expired intents with canonical JSON + hash + `order_type`, `time_in_force`, `rationale_features_ref`.
+- `approvals`: stored approval hash + timestamp + `approved_by`.
+- `executions`: execution attempts (paper/live) with status, `fee`, `slippage_model`, and details.
+- `orders`: order records keyed by `order_id` with raw exchange/paper payloads.
 - `fills`: executed fills.
 - `trade_results`: realized PnL and metadata.
+- `daily_stats`: derived day-level stats (orders_count, realized_pnl).
+- `reports`: metrics JSON + equity curve path per run.
 - `audit_logs`: event trail for ingest/propose/approve/execute/report/backtest.
 
 ## Timing model
 - **Market data**: `candles.ts` is exchange time in ms; `ingested_at` is local UTC (observed_at).
 - **Orderbook**: `orderbook_snapshots.ts` is exchange time in ms; `ingested_at` is local UTC.
-- **News**: `published_at` from RSS (UTC normalized); `ingested_at` is local UTC (observed_at).
-- **Features**: `extracted_at` is local UTC.
-- **Latency guard**: proposals/backtests only use news with `published_at <= now - news_latency_seconds` to avoid lookahead.
+- **News**: `published_at` from RSS (UTC normalized); `observed_at` is local UTC (ingest time).
+- **Features**: `extracted_at` / `computed_at` are local UTC.
+- **Latency guard**: proposals/backtests only use news with `observed_at <= ts - news_latency_seconds` and lookback windows bound by `published_at`.
 
 ## Safety gates
 - **Paper default**: config defaults to paper + dry run.
 - **Human approval**: `trading.require_approval` must be satisfied unless autopilot constraints pass.
+- **Approve+Execute**: a convenience flow that still records approval and enforces the same gates.
 - **Live double-consent**: both env and config flags are required for live execution.
 - **Long-only**: sells are only allowed when a spot position exists; otherwise proposals become hold.
 - **Risk limits**: kill switch, daily loss proxy, order count, cooldown, position sizing, notional caps.

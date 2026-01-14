@@ -18,6 +18,7 @@ def test_canonical_json_and_hash() -> None:
         strategy="baseline",
         confidence=0.7,
         rationale="test",
+        rationale_features_ref="feat-1",
         expires_at="2024-01-01T00:15:00+00:00",
         mode="paper",
     )
@@ -31,6 +32,7 @@ def test_canonical_json_and_hash() -> None:
         '"order_type":"limit",'
         '"price":5000000.0,'
         '"rationale":"test",'
+        '"rationale_features_ref":"feat-1",'
         '"side":"buy",'
         '"size":0.1,'
         '"strategy":"baseline",'

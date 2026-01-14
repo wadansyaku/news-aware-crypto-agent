@@ -30,16 +30,25 @@ uv run trade-agent status
 uv run trade-agent ingest --orderbook
 uv run trade-agent propose --strategy news_overlay
 uv run trade-agent approve <intent_id>
+uv run trade-agent approve-execute <intent_id> --mode paper
 uv run trade-agent execute --mode paper
 uv run trade-agent backtest --from 2024-01-01 --to 2024-02-01
 uv run trade-agent report
 ```
 
-## UI (Streamlit)
+## Web UI (recommended)
+Install web UI extras and launch:
+```bash
+uv pip install -e '.[dev,web]'
+uv run trade-agent-web
+```
+Open `http://127.0.0.1:8000` in your browser.
+
+## UI (Streamlit, legacy/optional)
 Install UI extras and launch:
 ```bash
 uv pip install -e '.[dev,ui]'
-uv run streamlit run streamlit_app.py
+uv run streamlit run legacy/streamlit_app.py
 ```
 
 ### Commands

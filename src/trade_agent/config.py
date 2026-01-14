@@ -8,6 +8,26 @@ import yaml
 from dotenv import load_dotenv
 
 
+class ConfigValidationError(Exception):
+    def __init__(self, field: str, message: str, suggestion: str = "") -> None:
+        self.field = field
+        self.message = message
+        self.suggestion = suggestion
+        super().__init__(f"{field}: {message}")
+
+    def __str__(self) -> str:
+        if self.suggestion:
+            return f"{self.field}: {self.message} ({self.suggestion})"
+        return f"{self.field}: {self.message}"
+
+
+class ConfigValidationException(Exception):
+    def __init__(self, errors: list[ConfigValidationError]) -> None:
+        self.errors = errors
+        message = "\n".join(str(err) for err in errors)
+        super().__init__(message)
+
+
 @dataclass
 class AppConfig:
     name: str
@@ -104,7 +124,10 @@ class PaperConfig:
 
 @dataclass
 class BacktestConfig:
-    fee_bps: float
+    maker_fee_bps: float
+    taker_fee_bps: float
+    slippage_bps: float
+    assume_taker: bool
 
 
 @dataclass
@@ -200,6 +223,10 @@ DEFAULTS: dict[str, Any] = {
     },
     "backtest": {
         "fee_bps": 10,
+        "maker_fee_bps": 5,
+        "taker_fee_bps": 10,
+        "slippage_bps": 5,
+        "assume_taker": True,
     },
     "autopilot": {
         "enabled": False,
@@ -235,6 +262,9 @@ def load_config(path: str) -> AppSettings:
     with open(path, "r", encoding="utf-8") as handle:
         raw = yaml.safe_load(handle) or {}
     merged = _merge_dicts(DEFAULTS, raw)
+    raw_backtest = raw.get("backtest", {}) if isinstance(raw, dict) else {}
+    has_maker = isinstance(raw_backtest, dict) and "maker_fee_bps" in raw_backtest
+    has_taker = isinstance(raw_backtest, dict) and "taker_fee_bps" in raw_backtest
 
     app = AppConfig(
         name=_get(merged, "app", "name", default=DEFAULTS["app"]["name"]),
@@ -556,10 +586,34 @@ def load_config(path: str) -> AppSettings:
         ),
     )
 
+    fee_bps = float(_get(merged, "backtest", "fee_bps", default=DEFAULTS["backtest"]["fee_bps"]))
     backtest = BacktestConfig(
-        fee_bps=float(
-            _get(merged, "backtest", "fee_bps", default=DEFAULTS["backtest"]["fee_bps"])
-        )
+        maker_fee_bps=float(
+            _get(merged, "backtest", "maker_fee_bps", default=fee_bps)
+            if has_maker
+            else fee_bps
+        ),
+        taker_fee_bps=float(
+            _get(merged, "backtest", "taker_fee_bps", default=fee_bps)
+            if has_taker
+            else fee_bps
+        ),
+        slippage_bps=float(
+            _get(
+                merged,
+                "backtest",
+                "slippage_bps",
+                default=DEFAULTS["backtest"]["slippage_bps"],
+            )
+        ),
+        assume_taker=bool(
+            _get(
+                merged,
+                "backtest",
+                "assume_taker",
+                default=DEFAULTS["backtest"]["assume_taker"],
+            )
+        ),
     )
 
     autopilot = AutopilotConfig(
@@ -611,6 +665,40 @@ def load_config(path: str) -> AppSettings:
         backtest=backtest,
         autopilot=autopilot,
     )
+
+
+def validate_config(settings: AppSettings) -> list[ConfigValidationError]:
+    errors: list[ConfigValidationError] = []
+
+    if not settings.exchange.name:
+        errors.append(
+            ConfigValidationError(
+                field="exchange.name",
+                message="取引所名が指定されていません",
+                suggestion="config.yaml で exchange.name を設定してください (例: bitflyer)",
+            )
+        )
+
+    for sym in settings.trading.symbol_whitelist:
+        if "/" not in sym:
+            errors.append(
+                ConfigValidationError(
+                    field="trading.symbol_whitelist",
+                    message=f"無効なシンボル形式: {sym}",
+                    suggestion="BASE/QUOTE 形式で指定してください (例: BTC/JPY)",
+                )
+            )
+
+    if settings.risk.max_order_notional_jpy > settings.risk.capital_jpy:
+        errors.append(
+            ConfigValidationError(
+                field="risk.max_order_notional_jpy",
+                message="最大注文額が資本を超えています",
+                suggestion="max_order_notional_jpy <= capital_jpy に設定してください",
+            )
+        )
+
+    return errors
 
 
 def ensure_data_dir(settings: AppSettings) -> Path:

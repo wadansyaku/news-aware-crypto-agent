@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from trade_agent import db
 from trade_agent.config import load_config, resolve_db_path
 from trade_agent.executor import execute_intent
 from trade_agent.intent import TradePlan, from_plan
+from trade_agent.store import SQLiteStore
 
 
 def test_paper_execution_deterministic(tmp_path: Path) -> None:
@@ -41,8 +41,7 @@ paper:
     )
 
     settings = load_config(str(config_path))
-    conn = db.connect(resolve_db_path(settings))
-    db.init_db(conn)
+    store = SQLiteStore(resolve_db_path(settings))
 
     plan = TradePlan(
         symbol="BTC/JPY",
@@ -54,11 +53,10 @@ paper:
         strategy="baseline",
     )
     intent = from_plan(plan, mode="paper", expiry_seconds=300)
-    db.insert_order_intent(conn, intent.as_record())
-    db.insert_approval(conn, intent.intent_id, intent.hash(), "I APPROVE")
+    store.save_order_intent(intent)
+    store.save_approval_phrase(intent.intent_id, intent.hash(), "I APPROVE", "test")
 
-    db.insert_orderbook_snapshot(
-        conn,
+    store.save_orderbook_snapshot(
         symbol="BTC/JPY",
         bid=99.0,
         ask=101.0,
@@ -67,8 +65,9 @@ paper:
         ts=0,
     )
 
-    result = execute_intent(conn, intent.intent_id, settings, mode="paper")
+    result = execute_intent(store, intent.intent_id, settings, mode="paper")
     assert result.status == "filled"
 
-    row = conn.execute("SELECT price FROM fills").fetchone()
-    assert row["price"] == 101.0
+    fills = store.list_fills(symbol="BTC/JPY", limit=1)
+    assert fills[0]["price"] == 101.0
+    store.close()

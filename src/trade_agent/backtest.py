@@ -4,12 +4,12 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Sequence
 
-import sqlite3
-
-from trade_agent import db
 from trade_agent.config import AppSettings
-from trade_agent.metrics import compute_metrics, save_report
+from trade_agent.metrics import Metrics, compute_metrics, save_report
+from trade_agent.news.features import aggregate_feature_vector
 from trade_agent.risk import RiskState, evaluate_plan
+from trade_agent.schemas import FeatureRow
+from trade_agent.store import SQLiteStore
 from trade_agent.strategies import baseline, news_overlay
 
 
@@ -17,6 +17,10 @@ from trade_agent.strategies import baseline, news_overlay
 class BacktestResult:
     metrics_path_json: str
     metrics_path_csv: str
+    metrics_path_summary: str
+    metrics: Metrics
+    equity: list[float]
+    trades: list[dict]
 
 
 def _iso_to_ms(ts: str) -> int:
@@ -31,28 +35,29 @@ def _ms_to_iso(ts_ms: int) -> str:
 
 
 def _collect_news_features(
-    conn: sqlite3.Connection, start_iso: str, end_iso: str
+    store: SQLiteStore, start_iso: str, end_iso: str, latency_seconds: int
 ) -> list[dict]:
-    cur = conn.execute(
-        """
-        SELECT nf.sentiment, nf.source_weight, na.published_at
-        FROM news_features nf
-        JOIN news_articles na ON nf.article_id = na.id
-        WHERE na.published_at >= ? AND na.published_at <= ?
-        ORDER BY na.published_at ASC
-        """,
-        (start_iso, end_iso),
+    features = store.list_news_features_window(
+        start_iso=start_iso,
+        end_iso=end_iso,
+        observed_cutoff=end_iso,
+        limit=100000,
     )
-    features = []
-    for row in cur.fetchall():
-        features.append(
+    enriched = []
+    for row in features:
+        published = datetime.fromisoformat(row["published_at"])
+        observed = datetime.fromisoformat(row["observed_at"])
+        available_at = max(observed, published + timedelta(seconds=latency_seconds))
+        enriched.append(
             {
                 "sentiment": float(row["sentiment"]),
                 "source_weight": float(row["source_weight"]),
                 "published_at": row["published_at"],
+                "observed_at": row["observed_at"],
+                "available_at": available_at.isoformat(),
             }
         )
-    return features
+    return sorted(enriched, key=lambda row: row["available_at"])
 
 
 def _filter_recent_news(features: Sequence[dict], cutoff: datetime, lookback_hours: int) -> list[dict]:
@@ -65,7 +70,7 @@ def _filter_recent_news(features: Sequence[dict], cutoff: datetime, lookback_hou
 
 
 def run_backtest(
-    conn: sqlite3.Connection,
+    store: SQLiteStore,
     settings: AppSettings,
     symbol: str,
     timeframe: str,
@@ -76,11 +81,16 @@ def run_backtest(
 ) -> BacktestResult:
     start_ms = _iso_to_ms(f"{start}T00:00:00+00:00")
     end_ms = _iso_to_ms(f"{end}T23:59:59+00:00")
-    candles = db.list_candles_between(conn, symbol, timeframe, start_ms, end_ms)
+    candles = store.list_candles_between(symbol, timeframe, start_ms, end_ms)
     if not candles:
         raise ValueError("no candles in range")
 
-    news_features_all = _collect_news_features(conn, _ms_to_iso(start_ms), _ms_to_iso(end_ms))
+    news_features_all = _collect_news_features(
+        store,
+        _ms_to_iso(start_ms),
+        _ms_to_iso(end_ms),
+        settings.news.news_latency_seconds,
+    )
     news_idx = 0
     available_news: list[dict] = []
 
@@ -94,18 +104,30 @@ def run_backtest(
         candle = candles[idx]
         ts = int(candle["ts"])
         current_time = datetime.fromtimestamp(ts / 1000, tz=timezone.utc)
-        cutoff = current_time - timedelta(seconds=settings.news.news_latency_seconds)
-
         while news_idx < len(news_features_all):
-            published = datetime.fromisoformat(news_features_all[news_idx]["published_at"])
-            if published <= cutoff:
+            available_at = datetime.fromisoformat(news_features_all[news_idx]["available_at"])
+            if available_at <= current_time:
                 available_news.append(news_features_all[news_idx])
                 news_idx += 1
             else:
                 break
 
         lookback_news = _filter_recent_news(
-            available_news, cutoff, settings.news.sentiment_lookback_hours
+            available_news, current_time, settings.news.sentiment_lookback_hours
+        )
+        feature_vector = aggregate_feature_vector(lookback_news)
+        store.save_feature_row(
+            FeatureRow(
+                symbol=symbol,
+                ts=ts,
+                features=feature_vector,
+                feature_version="news_v1",
+                computed_at=current_time.isoformat(),
+                news_window_start=(
+                    current_time - timedelta(hours=settings.news.sentiment_lookback_hours)
+                ).isoformat(),
+                news_window_end=current_time.isoformat(),
+            )
         )
 
         candle_slice = candles[: idx + 1]
@@ -132,7 +154,7 @@ def run_backtest(
         state.unrealized_pnl = (price - avg_cost) * position if position > 0 else 0.0
 
         risk_result = evaluate_plan(
-            conn,
+            store,
             plan,
             settings.risk,
             settings.trading,
@@ -144,20 +166,39 @@ def run_backtest(
             continue
 
         plan = risk_result.plan
-        fee_rate = settings.backtest.fee_bps / 10000
+        fee_bps = (
+            settings.backtest.taker_fee_bps
+            if settings.backtest.assume_taker
+            else settings.backtest.maker_fee_bps
+        )
+        fee_rate = fee_bps / 10000
+        slippage = settings.backtest.slippage_bps / 10000
         if plan.side == "buy" and position <= 0:
             size = plan.size
-            fee = price * size * fee_rate
-            total_cost = price * size + fee
+            exec_price = price * (1 + slippage)
+            fee = exec_price * size * fee_rate
+            total_cost = exec_price * size + fee
             avg_cost = (avg_cost * position + total_cost) / (position + size) if position + size > 0 else 0.0
             position += size
             state.daily_orders += 1
             state.last_exec_time = current_time
-            trades.append({"pnl_jpy": 0.0, "notional_jpy": price * size, "fee_jpy": fee})
+            trades.append(
+                {
+                    "symbol": symbol,
+                    "side": "buy",
+                    "size": size,
+                    "price": exec_price,
+                    "pnl_jpy": 0.0,
+                    "notional_jpy": exec_price * size,
+                    "fee_jpy": fee,
+                    "created_at": current_time.isoformat(),
+                }
+            )
         elif plan.side == "sell" and position > 0:
             size = min(plan.size, position)
-            fee = price * size * fee_rate
-            pnl = (price - avg_cost) * size - fee
+            exec_price = price * (1 - slippage)
+            fee = exec_price * size * fee_rate
+            pnl = (exec_price - avg_cost) * size - fee
             position -= size
             if position <= 0:
                 position = 0.0
@@ -165,8 +206,31 @@ def run_backtest(
             state.daily_orders += 1
             state.daily_pnl += pnl
             state.last_exec_time = current_time
-            trades.append({"pnl_jpy": pnl, "notional_jpy": price * size, "fee_jpy": fee})
+            trades.append(
+                {
+                    "symbol": symbol,
+                    "side": "sell",
+                    "size": size,
+                    "price": exec_price,
+                    "pnl_jpy": pnl,
+                    "notional_jpy": exec_price * size,
+                    "fee_jpy": fee,
+                    "created_at": current_time.isoformat(),
+                }
+            )
 
-    metrics, equity = compute_metrics(trades)
+    metrics, equity = compute_metrics(
+        trades,
+        capital_jpy=settings.risk.capital_jpy,
+        start_at=f"{start}T00:00:00+00:00",
+        end_at=f"{end}T23:59:59+00:00",
+    )
     paths = save_report(metrics, equity, output_dir, f"backtest_{strategy_name}")
-    return BacktestResult(metrics_path_json=paths["json"], metrics_path_csv=paths["csv"])
+    return BacktestResult(
+        metrics_path_json=paths["json"],
+        metrics_path_csv=paths["csv"],
+        metrics_path_summary=paths["summary"],
+        metrics=metrics,
+        equity=equity,
+        trades=trades,
+    )

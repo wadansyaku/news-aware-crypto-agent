@@ -3,12 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Optional
-
-import sqlite3
-
-from trade_agent import db
 from trade_agent.config import RiskConfig, TradingConfig
 from trade_agent.intent import TradePlan
+from trade_agent.store import SQLiteStore
 
 
 @dataclass
@@ -31,7 +28,7 @@ def _utc_day() -> str:
 
 
 def evaluate_plan(
-    conn: sqlite3.Connection,
+    store: SQLiteStore,
     plan: TradePlan,
     risk: RiskConfig,
     trading: TradingConfig,
@@ -53,11 +50,11 @@ def evaluate_plan(
 
     if state is None:
         day = _utc_day()
-        realized_pnl = db.get_daily_pnl(conn, day)
-        daily_orders = db.get_daily_execution_count(conn, day)
-        last_exec = db.get_last_execution_time(conn)
+        realized_pnl = store.get_daily_pnl(day)
+        daily_orders = store.get_daily_execution_count(day)
+        last_exec = store.get_last_execution_time()
         last_exec_time = datetime.fromisoformat(last_exec) if last_exec else None
-        position, avg_cost = db.get_position_state(conn, plan.symbol)
+        position, avg_cost = store.get_position_state(plan.symbol)
         unrealized_pnl = (plan.price - avg_cost) * position if position > 0 else 0.0
     else:
         realized_pnl = state.daily_pnl
@@ -78,7 +75,9 @@ def evaluate_plan(
         if current_time < cooldown:
             return RiskResult(approved=False, reason="cooldown active")
 
-    position = current_position if current_position is not None else db.get_position_size(conn, plan.symbol)
+    position = (
+        current_position if current_position is not None else store.get_position_size(plan.symbol)
+    )
 
     if plan.side == "sell" and position <= 0:
         if trading.long_only:

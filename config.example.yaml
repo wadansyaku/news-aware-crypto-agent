@@ -79,7 +79,10 @@ paper:
   spread_bps: 2
 
 backtest:
-  fee_bps: 10
+  maker_fee_bps: 5
+  taker_fee_bps: 10
+  slippage_bps: 5
+  assume_taker: true
 
 autopilot:
   enabled: false

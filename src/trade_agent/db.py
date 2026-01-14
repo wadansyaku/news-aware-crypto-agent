@@ -5,6 +5,8 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Any, Iterable
 
+from trade_agent.schemas import FeatureRow, ReportRecord
+
 
 def connect(db_path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path)
@@ -12,6 +14,49 @@ def connect(db_path: str) -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     return conn
+
+
+def _column_exists(conn: sqlite3.Connection, table: str, column: str) -> bool:
+    cur = conn.execute(f"PRAGMA table_info({table})")
+    return any(row["name"] == column for row in cur.fetchall())
+
+
+def _ensure_column(
+    conn: sqlite3.Connection, table: str, column: str, definition: str, default: Any | None = None
+) -> None:
+    if _column_exists(conn, table, column):
+        return
+    conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+    if default is not None:
+        conn.execute(
+            f"UPDATE {table} SET {column} = ? WHERE {column} IS NULL OR {column} = ''",
+            (default,),
+    )
+
+
+def _ensure_index(
+    conn: sqlite3.Connection,
+    name: str,
+    table: str,
+    columns: str,
+    unique: bool = False,
+    required_columns: list[str] | None = None,
+) -> None:
+    if required_columns:
+        for col in required_columns:
+            if not _column_exists(conn, table, col):
+                return
+    kind = "UNIQUE INDEX" if unique else "INDEX"
+    conn.execute(f"CREATE {kind} IF NOT EXISTS {name} ON {table}({columns})")
+
+
+def _iso_day(ts: str) -> str:
+    if len(ts) >= 10:
+        return ts[:10]
+    try:
+        return datetime.fromisoformat(ts).date().isoformat()
+    except ValueError:
+        return datetime.now(timezone.utc).date().isoformat()
 
 
 def init_db(conn: sqlite3.Connection) -> None:
@@ -26,6 +71,7 @@ def init_db(conn: sqlite3.Connection) -> None:
             low REAL NOT NULL,
             close REAL NOT NULL,
             volume REAL NOT NULL,
+            source TEXT NOT NULL,
             ingested_at TEXT NOT NULL,
             PRIMARY KEY (symbol, timeframe, ts)
         );
@@ -45,8 +91,12 @@ def init_db(conn: sqlite3.Connection) -> None:
             url TEXT NOT NULL,
             title TEXT NOT NULL,
             source TEXT NOT NULL,
+            guid TEXT,
+            summary TEXT,
             published_at TEXT NOT NULL,
+            observed_at TEXT NOT NULL,
             ingested_at TEXT NOT NULL,
+            raw_payload_hash TEXT,
             title_hash TEXT NOT NULL,
             UNIQUE (url),
             UNIQUE (title_hash)
@@ -59,6 +109,7 @@ def init_db(conn: sqlite3.Connection) -> None:
             keyword_flags TEXT NOT NULL,
             source_weight REAL NOT NULL,
             language TEXT NOT NULL,
+            feature_version TEXT NOT NULL,
             extracted_at TEXT NOT NULL,
             FOREIGN KEY (article_id) REFERENCES news_articles(id)
         );
@@ -73,10 +124,13 @@ def init_db(conn: sqlite3.Connection) -> None:
             strategy TEXT NOT NULL,
             symbol TEXT NOT NULL,
             side TEXT NOT NULL,
+            order_type TEXT NOT NULL,
+            time_in_force TEXT NOT NULL,
             size REAL NOT NULL,
             price REAL NOT NULL,
             confidence REAL NOT NULL,
             rationale TEXT NOT NULL,
+            rationale_features_ref TEXT,
             mode TEXT NOT NULL
         );
 
@@ -84,6 +138,8 @@ def init_db(conn: sqlite3.Connection) -> None:
             intent_id TEXT PRIMARY KEY,
             intent_hash TEXT NOT NULL,
             approved_at TEXT NOT NULL,
+            approved_by TEXT NOT NULL,
+            approval_phrase_hash TEXT NOT NULL,
             approval_phrase TEXT NOT NULL,
             FOREIGN KEY (intent_id) REFERENCES order_intents(intent_id)
         );
@@ -95,6 +151,8 @@ def init_db(conn: sqlite3.Connection) -> None:
             executed_at TEXT NOT NULL,
             mode TEXT NOT NULL,
             status TEXT NOT NULL,
+            fee REAL NOT NULL,
+            slippage_model TEXT NOT NULL,
             details_json TEXT NOT NULL,
             FOREIGN KEY (intent_id) REFERENCES order_intents(intent_id)
         );
@@ -112,6 +170,23 @@ def init_db(conn: sqlite3.Connection) -> None:
             FOREIGN KEY (exec_id) REFERENCES executions(exec_id)
         );
 
+        CREATE TABLE IF NOT EXISTS orders (
+            order_id TEXT PRIMARY KEY,
+            exec_id TEXT NOT NULL,
+            intent_id TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            mode TEXT NOT NULL,
+            symbol TEXT NOT NULL,
+            side TEXT NOT NULL,
+            order_type TEXT NOT NULL,
+            time_in_force TEXT NOT NULL,
+            size REAL NOT NULL,
+            price REAL NOT NULL,
+            status TEXT NOT NULL,
+            raw_json TEXT NOT NULL,
+            FOREIGN KEY (intent_id) REFERENCES order_intents(intent_id)
+        );
+
         CREATE TABLE IF NOT EXISTS trade_results (
             trade_id TEXT PRIMARY KEY,
             intent_id TEXT NOT NULL,
@@ -122,14 +197,97 @@ def init_db(conn: sqlite3.Connection) -> None:
             FOREIGN KEY (intent_id) REFERENCES order_intents(intent_id)
         );
 
+        CREATE TABLE IF NOT EXISTS daily_stats (
+            day TEXT PRIMARY KEY,
+            orders_count INTEGER NOT NULL,
+            realized_pnl REAL NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS feature_rows (
+            symbol TEXT NOT NULL,
+            ts INTEGER NOT NULL,
+            feature_version TEXT NOT NULL,
+            features_json TEXT NOT NULL,
+            computed_at TEXT NOT NULL,
+            news_window_start TEXT NOT NULL,
+            news_window_end TEXT NOT NULL,
+            PRIMARY KEY (symbol, ts, feature_version)
+        );
+
+        CREATE TABLE IF NOT EXISTS reports (
+            run_id TEXT PRIMARY KEY,
+            period TEXT NOT NULL,
+            metrics_json TEXT NOT NULL,
+            equity_curve_path TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS audit_logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             ts TEXT NOT NULL,
             event TEXT NOT NULL,
             data_json TEXT NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS alerts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            symbol TEXT NOT NULL,
+            condition TEXT NOT NULL,
+            threshold REAL NOT NULL,
+            enabled INTEGER DEFAULT 1,
+            triggered_at TEXT,
+            created_at TEXT NOT NULL
+        );
         """
     )
+
+    _ensure_column(conn, "candles", "source", "TEXT NOT NULL DEFAULT 'exchange'", "exchange")
+    _ensure_column(conn, "news_articles", "guid", "TEXT")
+    _ensure_column(conn, "news_articles", "summary", "TEXT")
+    _ensure_column(conn, "news_articles", "observed_at", "TEXT NOT NULL DEFAULT ''", utc_now_iso())
+    _ensure_column(conn, "news_articles", "raw_payload_hash", "TEXT")
+    conn.execute(
+        """
+        UPDATE news_articles
+        SET observed_at = ingested_at
+        WHERE observed_at IS NULL OR observed_at = ''
+        """
+    )
+    _ensure_column(
+        conn, "news_features", "feature_version", "TEXT NOT NULL DEFAULT 'news_v1'", "news_v1"
+    )
+    _ensure_column(conn, "order_intents", "order_type", "TEXT NOT NULL DEFAULT 'limit'", "limit")
+    _ensure_column(conn, "order_intents", "time_in_force", "TEXT NOT NULL DEFAULT 'GTC'", "GTC")
+    _ensure_column(conn, "order_intents", "rationale_features_ref", "TEXT")
+    _ensure_column(conn, "approvals", "approved_by", "TEXT NOT NULL DEFAULT 'local'", "local")
+    _ensure_column(conn, "approvals", "approval_phrase_hash", "TEXT NOT NULL DEFAULT ''", "")
+    _ensure_column(conn, "executions", "fee", "REAL NOT NULL DEFAULT 0", 0.0)
+    _ensure_column(conn, "executions", "slippage_model", "TEXT NOT NULL DEFAULT ''", "")
+
+    _ensure_index(conn, "idx_candles_symbol_timeframe_ts", "candles", "symbol, timeframe, ts")
+    _ensure_index(conn, "idx_news_published_at", "news_articles", "published_at")
+    _ensure_index(
+        conn,
+        "idx_news_observed_at",
+        "news_articles",
+        "observed_at",
+        required_columns=["observed_at"],
+    )
+    _ensure_index(
+        conn,
+        "idx_news_features_article_version",
+        "news_features",
+        "article_id, feature_version",
+        unique=True,
+        required_columns=["feature_version"],
+    )
+    _ensure_index(conn, "idx_feature_rows_symbol_ts", "feature_rows", "symbol, ts")
+    _ensure_index(conn, "idx_executions_intent_id", "executions", "intent_id")
+    _ensure_index(conn, "idx_fills_symbol", "fills", "symbol")
+    _ensure_index(conn, "idx_orders_intent_id", "orders", "intent_id")
+    _ensure_index(conn, "idx_daily_stats_day", "daily_stats", "day", unique=True)
+    _ensure_index(conn, "idx_alerts_symbol", "alerts", "symbol")
     conn.commit()
 
 
@@ -138,7 +296,11 @@ def utc_now_iso() -> str:
 
 
 def insert_candles(
-    conn: sqlite3.Connection, symbol: str, timeframe: str, candles: Iterable[list[Any]]
+    conn: sqlite3.Connection,
+    symbol: str,
+    timeframe: str,
+    candles: Iterable[list[Any]],
+    source: str = "exchange",
 ) -> int:
     ingested_at = utc_now_iso()
     before = conn.total_changes
@@ -152,6 +314,7 @@ def insert_candles(
             float(c[3]),
             float(c[4]),
             float(c[5]),
+            source,
             ingested_at,
         )
         for c in candles
@@ -159,8 +322,8 @@ def insert_candles(
     conn.executemany(
         """
         INSERT OR IGNORE INTO candles
-        (symbol, timeframe, ts, open, high, low, close, volume, ingested_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (symbol, timeframe, ts, open, high, low, close, volume, source, ingested_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         rows,
     )
@@ -215,15 +378,31 @@ def insert_news_article(
     source: str,
     published_at: str,
     title_hash: str,
+    guid: str | None = None,
+    summary: str | None = None,
+    observed_at: str | None = None,
+    raw_payload_hash: str | None = None,
 ) -> int | None:
+    observed_at = observed_at or utc_now_iso()
     try:
         cur = conn.execute(
             """
             INSERT INTO news_articles
-            (url, title, source, published_at, ingested_at, title_hash)
-            VALUES (?, ?, ?, ?, ?, ?)
+            (url, title, source, guid, summary, published_at, observed_at, ingested_at, raw_payload_hash, title_hash)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (url, title, source, published_at, utc_now_iso(), title_hash),
+            (
+                url,
+                title,
+                source,
+                guid,
+                summary,
+                published_at,
+                observed_at,
+                observed_at,
+                raw_payload_hash,
+                title_hash,
+            ),
         )
         conn.commit()
         return int(cur.lastrowid)
@@ -238,12 +417,13 @@ def insert_news_features(
     keyword_flags: dict[str, bool],
     source_weight: float,
     language: str,
+    feature_version: str = "news_v1",
 ) -> None:
     conn.execute(
         """
-        INSERT INTO news_features
-        (article_id, sentiment, keyword_flags, source_weight, language, extracted_at)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT OR IGNORE INTO news_features
+        (article_id, sentiment, keyword_flags, source_weight, language, feature_version, extracted_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         """,
         (
             article_id,
@@ -251,19 +431,44 @@ def insert_news_features(
             json.dumps(keyword_flags, separators=(",", ":"), sort_keys=True),
             source_weight,
             language,
+            feature_version,
             utc_now_iso(),
         ),
     )
     conn.commit()
 
 
-def insert_order_intent(conn: sqlite3.Connection, intent: dict[str, Any]) -> None:
+def insert_feature_row(conn: sqlite3.Connection, row: FeatureRow) -> int:
+    before = conn.total_changes
     conn.execute(
         """
-        INSERT INTO order_intents
+        INSERT OR IGNORE INTO feature_rows
+        (symbol, ts, feature_version, features_json, computed_at, news_window_start, news_window_end)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            row.symbol,
+            row.ts,
+            row.feature_version,
+            json.dumps(row.features, separators=(",", ":"), sort_keys=True),
+            row.computed_at,
+            row.news_window_start,
+            row.news_window_end,
+        ),
+    )
+    conn.commit()
+    return conn.total_changes - before
+
+
+def insert_order_intent(conn: sqlite3.Connection, intent: dict[str, Any]) -> bool:
+    before = conn.total_changes
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO order_intents
         (intent_id, created_at, intent_json, intent_hash, status, expires_at, strategy,
-         symbol, side, size, price, confidence, rationale, mode)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         symbol, side, order_type, time_in_force, size, price, confidence, rationale,
+         rationale_features_ref, mode)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             intent["intent_id"],
@@ -275,14 +480,18 @@ def insert_order_intent(conn: sqlite3.Connection, intent: dict[str, Any]) -> Non
             intent["strategy"],
             intent["symbol"],
             intent["side"],
+            intent.get("order_type", "limit"),
+            intent.get("time_in_force", "GTC"),
             intent["size"],
             intent["price"],
             intent["confidence"],
             intent["rationale"],
+            intent.get("rationale_features_ref"),
             intent["mode"],
         ),
     )
     conn.commit()
+    return (conn.total_changes - before) > 0
 
 
 def update_order_intent_status(conn: sqlite3.Connection, intent_id: str, status: str) -> None:
@@ -307,15 +516,24 @@ def get_latest_intent(conn: sqlite3.Connection, status: str = "proposed") -> sql
 
 
 def insert_approval(
-    conn: sqlite3.Connection, intent_id: str, intent_hash: str, approval_phrase: str
+    conn: sqlite3.Connection,
+    intent_id: str,
+    intent_hash: str,
+    approval_phrase_hash: str,
+    approved_by: str,
+    approved_at: str | None = None,
+    approval_phrase: str | None = None,
 ) -> None:
+    approved_at = approved_at or utc_now_iso()
+    if approval_phrase is None:
+        approval_phrase = approval_phrase_hash
     conn.execute(
         """
         INSERT OR REPLACE INTO approvals
-        (intent_id, intent_hash, approved_at, approval_phrase)
-        VALUES (?, ?, ?, ?)
+        (intent_id, intent_hash, approved_at, approved_by, approval_phrase_hash, approval_phrase)
+        VALUES (?, ?, ?, ?, ?, ?)
         """,
-        (intent_id, intent_hash, utc_now_iso(), approval_phrase),
+        (intent_id, intent_hash, approved_at, approved_by, approval_phrase_hash, approval_phrase),
     )
     conn.commit()
 
@@ -333,24 +551,31 @@ def insert_execution(
     mode: str,
     status: str,
     details: dict[str, Any],
+    fee: float = 0.0,
+    slippage_model: str = "",
+    executed_at: str | None = None,
 ) -> None:
+    executed_at = executed_at or utc_now_iso()
     conn.execute(
         """
         INSERT INTO executions
-        (exec_id, intent_id, intent_hash, executed_at, mode, status, details_json)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        (exec_id, intent_id, intent_hash, executed_at, mode, status, fee, slippage_model, details_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             exec_id,
             intent_id,
             intent_hash,
-            utc_now_iso(),
+            executed_at,
             mode,
             status,
+            fee,
+            slippage_model,
             json.dumps(details, separators=(",", ":"), sort_keys=True),
         ),
     )
     conn.commit()
+    upsert_daily_stats(conn, day=_iso_day(executed_at), orders_delta=1, realized_delta=0.0)
 
 
 def insert_fill(
@@ -384,6 +609,7 @@ def insert_trade_result(
     mode: str,
     meta: dict[str, Any],
 ) -> None:
+    created_at = utc_now_iso()
     conn.execute(
         """
         INSERT INTO trade_results
@@ -394,9 +620,96 @@ def insert_trade_result(
             trade_id,
             intent_id,
             pnl_jpy,
-            utc_now_iso(),
+            created_at,
             mode,
             json.dumps(meta, separators=(",", ":"), sort_keys=True),
+        ),
+    )
+    conn.commit()
+    upsert_daily_stats(conn, day=_iso_day(created_at), orders_delta=0, realized_delta=pnl_jpy)
+
+
+def insert_order(
+    conn: sqlite3.Connection,
+    order_id: str,
+    exec_id: str,
+    intent_id: str,
+    created_at: str,
+    mode: str,
+    symbol: str,
+    side: str,
+    order_type: str,
+    time_in_force: str,
+    size: float,
+    price: float,
+    status: str,
+    raw: dict[str, Any],
+) -> None:
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO orders
+        (order_id, exec_id, intent_id, created_at, mode, symbol, side, order_type,
+         time_in_force, size, price, status, raw_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            order_id,
+            exec_id,
+            intent_id,
+            created_at,
+            mode,
+            symbol,
+            side,
+            order_type,
+            time_in_force,
+            size,
+            price,
+            status,
+            json.dumps(raw, separators=(",", ":"), sort_keys=True),
+        ),
+    )
+    conn.commit()
+
+
+def upsert_daily_stats(
+    conn: sqlite3.Connection, day: str, orders_delta: int, realized_delta: float
+) -> None:
+    now = utc_now_iso()
+    conn.execute(
+        """
+        INSERT INTO daily_stats (day, orders_count, realized_pnl, updated_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(day) DO UPDATE SET
+            orders_count = orders_count + ?,
+            realized_pnl = realized_pnl + ?,
+            updated_at = ?
+        """,
+        (
+            day,
+            orders_delta,
+            realized_delta,
+            now,
+            orders_delta,
+            realized_delta,
+            now,
+        ),
+    )
+    conn.commit()
+
+
+def insert_report(conn: sqlite3.Connection, record: ReportRecord) -> None:
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO reports
+        (run_id, period, metrics_json, equity_curve_path, created_at)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (
+            record.run_id,
+            record.period,
+            json.dumps(record.metrics, separators=(",", ":"), sort_keys=True),
+            record.equity_curve_path,
+            record.created_at,
         ),
     )
     conn.commit()
@@ -426,6 +739,51 @@ def list_audit_logs(
     params.append(limit)
     cur = conn.execute(query, params)
     return cur.fetchall()
+
+
+def insert_alert(
+    conn: sqlite3.Connection,
+    symbol: str,
+    condition: str,
+    threshold: float,
+    created_at: str | None = None,
+) -> int:
+    created_at = created_at or utc_now_iso()
+    cur = conn.execute(
+        """
+        INSERT INTO alerts (symbol, condition, threshold, enabled, created_at)
+        VALUES (?, ?, ?, 1, ?)
+        """,
+        (symbol, condition, threshold, created_at),
+    )
+    conn.commit()
+    return int(cur.lastrowid)
+
+
+def list_alerts(conn: sqlite3.Connection, enabled_only: bool = False) -> list[sqlite3.Row]:
+    query = "SELECT * FROM alerts"
+    params: list[Any] = []
+    if enabled_only:
+        query += " WHERE enabled = 1"
+    query += " ORDER BY created_at DESC"
+    cur = conn.execute(query, params)
+    return cur.fetchall()
+
+
+def delete_alert(conn: sqlite3.Connection, alert_id: int) -> None:
+    conn.execute("DELETE FROM alerts WHERE id = ?", (alert_id,))
+    conn.commit()
+
+
+def update_alert_triggered(
+    conn: sqlite3.Connection, alert_id: int, triggered_at: str | None = None, enabled: int = 0
+) -> None:
+    triggered_at = triggered_at or utc_now_iso()
+    conn.execute(
+        "UPDATE alerts SET triggered_at = ?, enabled = ? WHERE id = ?",
+        (triggered_at, enabled, alert_id),
+    )
+    conn.commit()
 
 
 def get_daily_execution_count(conn: sqlite3.Connection, day: str) -> int:
@@ -513,7 +871,7 @@ def list_news_features(
 ) -> list[sqlite3.Row]:
     cur = conn.execute(
         """
-        SELECT nf.*, na.published_at FROM news_features nf
+        SELECT nf.*, na.published_at, na.observed_at FROM news_features nf
         JOIN news_articles na ON nf.article_id = na.id
         WHERE na.published_at <= ?
         ORDER BY na.published_at DESC
@@ -524,17 +882,151 @@ def list_news_features(
     return cur.fetchall()
 
 
+def list_latest_news_with_features(conn: sqlite3.Connection, limit: int = 50) -> list[sqlite3.Row]:
+    cur = conn.execute(
+        """
+        SELECT na.id, na.title, na.source, na.url, na.published_at, na.observed_at,
+               nf.sentiment, nf.keyword_flags, nf.source_weight, nf.language
+        FROM news_articles na
+        LEFT JOIN news_features nf ON nf.article_id = na.id
+        ORDER BY na.observed_at DESC
+        LIMIT ?
+        """,
+        (limit,),
+    )
+    return cur.fetchall()
+
+
+def list_news_features_since(conn: sqlite3.Connection, since_iso: str) -> list[sqlite3.Row]:
+    cur = conn.execute(
+        """
+        SELECT nf.sentiment, nf.source_weight, na.observed_at
+        FROM news_features nf
+        JOIN news_articles na ON nf.article_id = na.id
+        WHERE na.observed_at >= ?
+        ORDER BY na.observed_at ASC
+        """,
+        (since_iso,),
+    )
+    return cur.fetchall()
+
+
+def list_reports(conn: sqlite3.Connection, limit: int = 50) -> list[sqlite3.Row]:
+    cur = conn.execute(
+        """
+        SELECT run_id, period, metrics_json, equity_curve_path, created_at
+        FROM reports
+        ORDER BY created_at DESC
+        LIMIT ?
+        """,
+        (limit,),
+    )
+    return cur.fetchall()
+
+
+def get_latest_candle(conn: sqlite3.Connection, symbol: str, timeframe: str) -> sqlite3.Row | None:
+    cur = conn.execute(
+        """
+        SELECT ts, close FROM candles
+        WHERE symbol = ? AND timeframe = ?
+        ORDER BY ts DESC
+        LIMIT 1
+        """,
+        (symbol, timeframe),
+    )
+    return cur.fetchone()
+
+
+def list_recent_candles(
+    conn: sqlite3.Connection, symbol: str, timeframe: str, limit: int = 2
+) -> list[sqlite3.Row]:
+    cur = conn.execute(
+        """
+        SELECT ts, close FROM candles
+        WHERE symbol = ? AND timeframe = ?
+        ORDER BY ts DESC
+        LIMIT ?
+        """,
+        (symbol, timeframe, limit),
+    )
+    return cur.fetchall()
+
+
+def get_position_open_time(conn: sqlite3.Connection, symbol: str) -> str | None:
+    cur = conn.execute(
+        """
+        SELECT side, size, ts FROM fills
+        WHERE symbol = ?
+        ORDER BY ts ASC
+        """,
+        (symbol,),
+    )
+    size = 0.0
+    open_ts: str | None = None
+    for row in cur.fetchall():
+        side = row["side"]
+        fill_size = float(row["size"])
+        if side == "buy":
+            if size <= 0:
+                open_ts = row["ts"]
+            size += fill_size
+        elif side == "sell":
+            size -= fill_size
+            if size <= 0:
+                size = 0.0
+                open_ts = None
+    return open_ts
+
+
+def list_news_features_window(
+    conn: sqlite3.Connection,
+    start_iso: str,
+    end_iso: str,
+    observed_cutoff: str,
+    limit: int = 500,
+    feature_version: str = "news_v1",
+) -> list[sqlite3.Row]:
+    cur = conn.execute(
+        """
+        SELECT nf.sentiment, nf.source_weight, na.published_at, na.observed_at
+        FROM news_features nf
+        JOIN news_articles na ON nf.article_id = na.id
+        WHERE na.published_at >= ? AND na.published_at <= ?
+          AND na.observed_at <= ?
+          AND nf.feature_version = ?
+        ORDER BY na.published_at ASC
+        LIMIT ?
+        """,
+        (start_iso, end_iso, observed_cutoff, feature_version, limit),
+    )
+    return cur.fetchall()
+
+
 def list_news_features_since(
     conn: sqlite3.Connection, published_after: str
 ) -> list[sqlite3.Row]:
     cur = conn.execute(
         """
-        SELECT nf.*, na.published_at FROM news_features nf
+        SELECT nf.*, na.published_at, na.observed_at FROM news_features nf
         JOIN news_articles na ON nf.article_id = na.id
         WHERE na.published_at >= ?
         ORDER BY na.published_at ASC
         """,
         (published_after,),
+    )
+    return cur.fetchall()
+
+
+def list_news_items_between(
+    conn: sqlite3.Connection, start_iso: str, end_iso: str
+) -> list[sqlite3.Row]:
+    cur = conn.execute(
+        """
+        SELECT * FROM news_articles
+        WHERE published_at >= ? AND published_at <= ?
+        ORDER BY published_at ASC
+        """,
+        (start_iso, end_iso),
     )
     return cur.fetchall()
 
@@ -553,6 +1045,24 @@ def list_candles_between(
     return cur.fetchall()
 
 
+def list_feature_rows_between(
+    conn: sqlite3.Connection,
+    symbol: str,
+    start_ts: int,
+    end_ts: int,
+    feature_version: str = "news_v1",
+) -> list[sqlite3.Row]:
+    cur = conn.execute(
+        """
+        SELECT * FROM feature_rows
+        WHERE symbol = ? AND feature_version = ? AND ts >= ? AND ts <= ?
+        ORDER BY ts ASC
+        """,
+        (symbol, feature_version, start_ts, end_ts),
+    )
+    return cur.fetchall()
+
+
 def get_latest_candle_ts(conn: sqlite3.Connection, symbol: str, timeframe: str) -> int | None:
     cur = conn.execute(
         "SELECT MAX(ts) as max_ts FROM candles WHERE symbol = ? AND timeframe = ?",
@@ -564,16 +1074,19 @@ def get_latest_candle_ts(conn: sqlite3.Connection, symbol: str, timeframe: str) 
     return None
 
 
-def list_articles_without_features(conn: sqlite3.Connection, limit: int = 200) -> list[sqlite3.Row]:
+def list_articles_without_features(
+    conn: sqlite3.Connection, limit: int = 200, feature_version: str = "news_v1"
+) -> list[sqlite3.Row]:
     cur = conn.execute(
         """
         SELECT na.* FROM news_articles na
-        LEFT JOIN news_features nf ON na.id = nf.article_id
+        LEFT JOIN news_features nf
+            ON na.id = nf.article_id AND nf.feature_version = ?
         WHERE nf.id IS NULL
         ORDER BY na.published_at ASC
         LIMIT ?
         """,
-        (limit,),
+        (feature_version, limit),
     )
     return cur.fetchall()
 

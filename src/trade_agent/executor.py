@@ -9,11 +9,13 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
 
-from trade_agent import db
 from trade_agent.config import AppSettings
 from trade_agent.exchange import ExchangeClient, has_credentials
-from trade_agent.intent import OrderIntent, intent_expired
+from trade_agent.intent import OrderIntent, TradePlan, intent_expired
 from trade_agent.paper import OrderbookSnapshot, build_rng, estimate_orderbook_from_price, simulate_fill
+from trade_agent.risk import evaluate_plan
+from trade_agent.schemas import ExecutionRecord, FillRecord
+from trade_agent.store import SQLiteStore
 
 
 @dataclass
@@ -32,21 +34,22 @@ def _intent_from_record(record: sqlite3.Row) -> OrderIntent:
         side=payload["side"],
         size=float(payload["size"]),
         price=float(payload["price"]),
-        order_type=payload["order_type"],
-        time_in_force=payload["time_in_force"],
+        order_type=payload.get("order_type", "limit"),
+        time_in_force=payload.get("time_in_force", "GTC"),
         strategy=payload["strategy"],
         confidence=float(payload["confidence"]),
         rationale=payload["rationale"],
+        rationale_features_ref=payload.get("rationale_features_ref"),
         expires_at=payload["expires_at"],
         mode=payload["mode"],
     )
 
 
-def _approval_ok(conn: sqlite3.Connection, intent: OrderIntent) -> bool:
-    approval = db.get_approval(conn, intent.intent_id)
+def _approval_ok(store: SQLiteStore, intent_id: str, intent_hash: str) -> bool:
+    approval = store.get_approval(intent_id)
     if not approval:
         return False
-    return approval["intent_hash"] == intent.hash()
+    return approval["intent_hash"] == intent_hash
 
 
 def _autopilot_ok(settings: AppSettings, intent: OrderIntent) -> bool:
@@ -116,25 +119,79 @@ def _emulate_post_only_price(
     return price, details
 
 
+def _record_order(
+    store: SQLiteStore,
+    order_id: str,
+    exec_id: str,
+    intent: OrderIntent,
+    mode: str,
+    status: str,
+    price: float,
+    raw: dict[str, object],
+    created_at: str,
+) -> None:
+    store.save_order(
+        order_id=order_id,
+        exec_id=exec_id,
+        intent_id=intent.intent_id,
+        created_at=created_at,
+        mode=mode,
+        symbol=intent.symbol,
+        side=intent.side,
+        order_type=intent.order_type,
+        time_in_force=intent.time_in_force,
+        size=float(intent.size),
+        price=float(price),
+        status=status,
+        raw=raw,
+    )
+
+
 def execute_intent(
-    conn: sqlite3.Connection,
+    store: SQLiteStore,
     intent_id: str,
     settings: AppSettings,
     mode: str,
     exchange_client: ExchangeClient | None = None,
 ) -> ExecutionResult:
-    record = db.get_order_intent(conn, intent_id)
+    record = store.get_order_intent(intent_id)
     if not record:
         return ExecutionResult(status="error", message="intent not found")
 
     intent = _intent_from_record(record)
+    intent_hash = record["intent_hash"]
+    if intent.hash() != intent_hash:
+        return ExecutionResult(status="rejected", message="intent hash mismatch")
     if intent_expired(intent):
-        db.update_order_intent_status(conn, intent_id, "expired")
+        store.update_order_intent_status(intent_id, "expired")
         return ExecutionResult(status="rejected", message="intent expired")
 
     if settings.trading.require_approval and not _autopilot_ok(settings, intent):
-        if not _approval_ok(conn, intent):
+        if not _approval_ok(store, intent.intent_id, intent_hash):
             return ExecutionResult(status="rejected", message="approval required")
+
+    plan = TradePlan(
+        symbol=intent.symbol,
+        side=intent.side,
+        size=float(intent.size),
+        price=float(intent.price),
+        confidence=float(intent.confidence),
+        rationale=intent.rationale,
+        strategy=intent.strategy,
+    )
+    risk_result = evaluate_plan(
+        store,
+        plan,
+        settings.risk,
+        settings.trading,
+        current_position=store.get_position_size(intent.symbol),
+    )
+    if not risk_result.approved or not risk_result.plan:
+        store.update_order_intent_status(intent.intent_id, "rejected")
+        return ExecutionResult(status="rejected", message=f"risk rejected: {risk_result.reason}")
+    if abs(risk_result.plan.size - intent.size) > 1e-9:
+        store.update_order_intent_status(intent.intent_id, "rejected")
+        return ExecutionResult(status="rejected", message="risk adjustment required; re-propose")
 
     if mode == "live":
         if settings.trading.dry_run:
@@ -150,7 +207,7 @@ def execute_intent(
 
     if mode == "paper":
         rng = build_rng(settings.paper)
-        snapshot = db.get_latest_orderbook_snapshot(conn, intent.symbol)
+        snapshot = store.get_latest_orderbook_snapshot(intent.symbol)
         if snapshot:
             orderbook = OrderbookSnapshot(
                 bid=float(snapshot["bid"]),
@@ -163,36 +220,56 @@ def execute_intent(
             orderbook = estimate_orderbook_from_price(intent.price, settings.paper.spread_bps)
 
         fill = simulate_fill(intent, orderbook, settings.paper, rng)
-        db.insert_execution(
-            conn,
+        _record_order(
+            store,
+            order_id=exec_id,
             exec_id=exec_id,
-            intent_id=intent.intent_id,
-            intent_hash=intent.hash(),
+            intent=intent,
             mode=mode,
             status=fill.status,
-            details={"message": fill.message},
+            price=fill.price if fill.filled else intent.price,
+            raw={
+                "message": fill.message,
+                "filled": fill.filled,
+                "orderbook": orderbook.__dict__,
+                "slippage_bps": settings.paper.slippage_bps,
+            },
+            created_at=now,
+        )
+        store.save_execution(
+            ExecutionRecord(
+                exec_id=exec_id,
+                intent_id=intent.intent_id,
+                intent_hash=intent_hash,
+                executed_at=now,
+                mode=mode,
+                status=fill.status,
+                fee=fill.fee if fill.filled else 0.0,
+                slippage_model="paper_v1",
+                details={"message": fill.message},
+            )
         )
         if fill.filled:
             fill_id = str(uuid.uuid4())
-            db.insert_fill(
-                conn,
-                fill_id=fill_id,
-                exec_id=exec_id,
-                symbol=intent.symbol,
-                side=intent.side,
-                size=fill.size,
-                price=fill.price,
-                fee=fill.fee,
-                fee_currency=fill.fee_currency,
-                ts=now,
+            store.save_fill(
+                FillRecord(
+                    fill_id=fill_id,
+                    exec_id=exec_id,
+                    symbol=intent.symbol,
+                    side=intent.side,
+                    size=fill.size,
+                    price=fill.price,
+                    fee=fill.fee,
+                    fee_currency=fill.fee_currency,
+                    ts=now,
+                )
             )
             pnl = 0.0
             notional = fill.price * fill.size
             if intent.side == "sell":
-                _, avg_cost = db.get_position_state(conn, intent.symbol)
+                _, avg_cost = store.get_position_state(intent.symbol)
                 pnl = (fill.price - avg_cost) * fill.size - fill.fee
-            db.insert_trade_result(
-                conn,
+            store.save_trade_result(
                 trade_id=str(uuid.uuid4()),
                 intent_id=intent.intent_id,
                 pnl_jpy=pnl,
@@ -204,7 +281,7 @@ def execute_intent(
                     "fee": fill.fee,
                 },
             )
-        db.update_order_intent_status(conn, intent.intent_id, fill.status)
+        store.update_order_intent_status(intent.intent_id, fill.status)
         return ExecutionResult(status=fill.status, message=fill.message, exec_id=exec_id)
 
     if mode == "live":
@@ -240,46 +317,82 @@ def execute_intent(
             if status not in {"closed", "filled"}:
                 exchange_client.cancel_order(order_id, intent.symbol)
                 status = "canceled"
-            db.insert_execution(
-                conn,
+            _record_order(
+                store,
+                order_id=str(order_id or exec_id),
                 exec_id=exec_id,
-                intent_id=intent.intent_id,
-                intent_hash=intent.hash(),
+                intent=intent,
                 mode=mode,
                 status=status,
-                details={
-                    "order_id": order_id,
+                price=order_price,
+                raw={
+                    "order": order,
                     "filled": filled,
                     "avg_price": avg_price,
                     **details,
                 },
+                created_at=now,
+            )
+            store.save_execution(
+                ExecutionRecord(
+                    exec_id=exec_id,
+                    intent_id=intent.intent_id,
+                    intent_hash=intent_hash,
+                    executed_at=now,
+                    mode=mode,
+                    status=status,
+                    fee=0.0,
+                    slippage_model="exchange",
+                    details={
+                        "order_id": order_id,
+                        "filled": filled,
+                        "avg_price": avg_price,
+                        **details,
+                    },
+                )
             )
             if filled > 0:
-                db.insert_fill(
-                    conn,
-                    fill_id=str(uuid.uuid4()),
-                    exec_id=exec_id,
-                    symbol=intent.symbol,
-                    side=intent.side,
-                    size=filled,
-                    price=avg_price,
-                    fee=0.0,
-                    fee_currency=settings.trading.base_currency,
-                    ts=now,
+                store.save_fill(
+                    FillRecord(
+                        fill_id=str(uuid.uuid4()),
+                        exec_id=exec_id,
+                        symbol=intent.symbol,
+                        side=intent.side,
+                        size=filled,
+                        price=avg_price,
+                        fee=0.0,
+                        fee_currency=settings.trading.base_currency,
+                        ts=now,
+                    )
                 )
-            db.update_order_intent_status(conn, intent.intent_id, status)
+            store.update_order_intent_status(intent.intent_id, status)
             return ExecutionResult(status=status, message="live execution", exec_id=exec_id)
         except Exception as exc:  # noqa: BLE001
-            db.insert_execution(
-                conn,
+            _record_order(
+                store,
+                order_id=exec_id,
                 exec_id=exec_id,
-                intent_id=intent.intent_id,
-                intent_hash=intent.hash(),
+                intent=intent,
                 mode=mode,
                 status="error",
-                details={"error": str(exc)},
+                price=intent.price,
+                raw={"error": str(exc)},
+                created_at=now,
             )
-            db.update_order_intent_status(conn, intent.intent_id, "error")
+            store.save_execution(
+                ExecutionRecord(
+                    exec_id=exec_id,
+                    intent_id=intent.intent_id,
+                    intent_hash=intent_hash,
+                    executed_at=now,
+                    mode=mode,
+                    status="error",
+                    fee=0.0,
+                    slippage_model="exchange",
+                    details={"error": str(exc)},
+                )
+            )
+            store.update_order_intent_status(intent.intent_id, "error")
             return ExecutionResult(status="error", message=str(exc), exec_id=exec_id)
 
     return ExecutionResult(status="error", message="unknown mode")
