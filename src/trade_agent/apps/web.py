@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from trade_agent.config import ConfigValidationException, load_raw_config, save_raw_config
+from trade_agent.config import ConfigValidationException, load_raw_config, resolve_db_path, save_raw_config
 from trade_agent.runner import Runner
 from trade_agent.services import (
     approval,
@@ -144,6 +144,34 @@ async def status_api() -> dict:
     store = context.open_store(settings)
     store.close()
     return status.get_status(settings)
+
+
+@app.get("/api/config")
+async def config_api() -> dict:
+    settings = _load_settings()
+    return {
+        "config": status.get_config_snapshot(settings),
+        "db_path": resolve_db_path(settings),
+    }
+
+
+@app.get("/api/risk/state")
+async def risk_state_api() -> dict:
+    settings = _load_settings()
+    store = context.open_store(settings)
+    try:
+        day = datetime.now(timezone.utc).date().isoformat()
+        daily_orders = store.get_daily_execution_count(day)
+        daily_pnl = store.get_daily_pnl(day)
+        last_exec = store.get_last_execution_time()
+        return {
+            "day": day,
+            "daily_orders": daily_orders,
+            "daily_pnl": daily_pnl,
+            "last_exec_at": last_exec,
+        }
+    finally:
+        store.close()
 
 
 @app.post("/api/config/safety")

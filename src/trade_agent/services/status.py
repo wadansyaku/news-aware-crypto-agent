@@ -7,6 +7,28 @@ from trade_agent.exchange import build_exchange, check_public_connection
 from trade_agent.news.rss import fetch_entries
 
 
+def get_config_snapshot(settings: AppSettings) -> dict[str, Any]:
+    return {
+        "exchange": settings.exchange.name,
+        "symbols": settings.trading.symbol_whitelist,
+        "timeframes": settings.trading.timeframes,
+        "mode": settings.trading.mode,
+        "dry_run": settings.trading.dry_run,
+        "require_approval": settings.trading.require_approval,
+        "approval_phrase": settings.trading.approval_phrase,
+        "kill_switch": settings.trading.kill_switch,
+        "autopilot_enabled": settings.autopilot.enabled,
+        "i_understand_live_trading": settings.trading.i_understand_live_trading,
+        "risk": {
+            "capital_jpy": settings.risk.capital_jpy,
+            "max_loss_jpy_per_day": settings.risk.max_loss_jpy_per_day,
+            "max_orders_per_day": settings.risk.max_orders_per_day,
+            "cooldown_minutes": settings.risk.cooldown_minutes,
+            "cooldown_bypass_pct": settings.risk.cooldown_bypass_pct,
+        },
+    }
+
+
 def get_status(settings: AppSettings) -> dict[str, Any]:
     exchange_client = build_exchange(settings.exchange)
     exchange_ok, exchange_msg = check_public_connection(exchange_client)
@@ -40,23 +62,5 @@ def get_status(settings: AppSettings) -> dict[str, Any]:
         },
         "news": {"ok": news_ok, "message": news_msg},
         "db_path": resolve_db_path(settings),
-        "config": {
-            "exchange": settings.exchange.name,
-            "symbols": settings.trading.symbol_whitelist,
-            "timeframes": settings.trading.timeframes,
-            "mode": settings.trading.mode,
-            "dry_run": settings.trading.dry_run,
-            "require_approval": settings.trading.require_approval,
-            "approval_phrase": settings.trading.approval_phrase,
-            "kill_switch": settings.trading.kill_switch,
-            "autopilot_enabled": settings.autopilot.enabled,
-            "i_understand_live_trading": settings.trading.i_understand_live_trading,
-            "risk": {
-                "capital_jpy": settings.risk.capital_jpy,
-                "max_loss_jpy_per_day": settings.risk.max_loss_jpy_per_day,
-                "max_orders_per_day": settings.risk.max_orders_per_day,
-                "cooldown_minutes": settings.risk.cooldown_minutes,
-                "cooldown_bypass_pct": settings.risk.cooldown_bypass_pct,
-            },
-        },
+        "config": get_config_snapshot(settings),
     }

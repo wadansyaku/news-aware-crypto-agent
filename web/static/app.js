@@ -57,6 +57,32 @@ function formatDuration(startIso) {
   return `${days}d ${rem}h`;
 }
 
+function applyConfig(config) {
+  if (!config) return;
+  state.config = config;
+  $("cfg-exchange").textContent = config.exchange;
+  $("cfg-symbols").textContent = config.symbols.join(", ");
+  $("cfg-timeframes").textContent = config.timeframes.join(", ");
+
+  $("cfg-mode").textContent = config.mode;
+  $("cfg-approval").textContent = config.require_approval ? "必須" : "不要";
+  $("cfg-autopilot").textContent = config.autopilot_enabled ? "ON" : "OFF";
+  $("cfg-kill").textContent = config.kill_switch ? "ON" : "OFF";
+  $("cfg-daily-loss").textContent = currency.format(config.risk.max_loss_jpy_per_day);
+  const maxOrdersNode = $("cfg-max-orders");
+  if (maxOrdersNode) {
+    maxOrdersNode.textContent = number.format(config.risk.max_orders_per_day || 0);
+  }
+
+  $("pos-symbol").textContent = config.symbols[0] || "-";
+  const defaultSymbol = config.symbols[0] || "";
+  if ($("ingest-symbol") && !$("ingest-symbol").value) $("ingest-symbol").value = defaultSymbol;
+  if ($("propose-symbol") && !$("propose-symbol").value) $("propose-symbol").value = defaultSymbol;
+  if ($("backtest-symbol") && !$("backtest-symbol").value) $("backtest-symbol").value = defaultSymbol;
+  if ($("analysis-symbol") && !$("analysis-symbol").value) $("analysis-symbol").value = defaultSymbol;
+  updateAlertSymbolOptions();
+}
+
 function updatePriceDirection(currentPrice) {
   const node = $("pos-current");
   node.classList.remove("price-up", "price-down");
@@ -466,36 +492,32 @@ async function apiRequest(path, options = {}) {
 
 async function loadStatus() {
   const data = await apiRequest("/api/status");
-  state.config = data.config;
+  applyConfig(data.config);
 
   $("status-exchange").textContent = `取引所: ${data.exchange.ok ? "OK" : "NG"} ${data.exchange.message}`;
   $("status-news").textContent = `ニュース: ${data.news.ok ? "OK" : "NG"} ${data.news.message}`;
   $("status-db").textContent = `DB: ${data.db_path}`;
-
-  $("cfg-exchange").textContent = data.config.exchange;
-  $("cfg-symbols").textContent = data.config.symbols.join(", ");
-  $("cfg-timeframes").textContent = data.config.timeframes.join(", ");
-
-  $("cfg-mode").textContent = data.config.mode;
-  $("cfg-approval").textContent = data.config.require_approval ? "必須" : "不要";
-  $("cfg-autopilot").textContent = data.config.autopilot_enabled ? "ON" : "OFF";
-  $("cfg-kill").textContent = data.config.kill_switch ? "ON" : "OFF";
-  $("cfg-daily-loss").textContent = currency.format(data.config.risk.max_loss_jpy_per_day);
-  const maxOrdersNode = $("cfg-max-orders");
-  if (maxOrdersNode) {
-    maxOrdersNode.textContent = number.format(data.config.risk.max_orders_per_day || 0);
-  }
-
-  $("pos-symbol").textContent = data.config.symbols[0] || "-";
-  const defaultSymbol = data.config.symbols[0] || "";
-  if (!$("ingest-symbol").value) $("ingest-symbol").value = defaultSymbol;
-  if (!$("propose-symbol").value) $("propose-symbol").value = defaultSymbol;
-  if (!$("backtest-symbol").value) $("backtest-symbol").value = defaultSymbol;
-  if ($("analysis-symbol") && !$("analysis-symbol").value) $("analysis-symbol").value = defaultSymbol;
-  updateAlertSymbolOptions();
   await loadPosition();
   await loadPortfolio();
   await loadIntents();
+}
+
+async function loadConfigLight() {
+  const data = await apiRequest("/api/config");
+  applyConfig(data.config);
+  if (data.db_path) {
+    $("status-db").textContent = `DB: ${data.db_path}`;
+  }
+}
+
+async function loadRiskState() {
+  const data = await apiRequest("/api/risk/state");
+  const maxOrders = state.config?.risk?.max_orders_per_day || 0;
+  const used = data?.daily_orders ?? 0;
+  const node = $("cfg-orders-used");
+  if (node) {
+    node.textContent = `本日実行数: ${number.format(used)} / ${number.format(maxOrders)}`;
+  }
 }
 
 async function loadPosition() {
@@ -620,6 +642,8 @@ function renderAuditList(logs) {
           labels.push(`bypass=${(updates.cooldown_bypass_pct * 100).toFixed(1)}%`);
         if ("max_loss_jpy_per_day" in updates)
           labels.push(`daily_loss=${currency.format(updates.max_loss_jpy_per_day)}`);
+        if ("max_orders_per_day" in updates)
+          labels.push(`max_orders=${updates.max_orders_per_day}`);
         summary = labels.length ? `安全設定: ${labels.join(", ")}` : "安全設定の更新";
       } else if (log.event === "runner_start") {
         summary = `開始: ${log.data.strategy || "-"} (${log.data.mode || "-"})`;
@@ -1846,6 +1870,12 @@ async function init() {
     $("status-db").textContent = "DB: -";
     return;
   }
+  try {
+    await loadRiskState();
+  } catch (err) {
+    const node = $("cfg-orders-used");
+    if (node) node.textContent = `本日実行数: 取得失敗`;
+  }
   updateNotificationStatus();
   try {
     await loadWatchlist();
@@ -1899,6 +1929,7 @@ async function init() {
   $("refresh-status").addEventListener("click", async () => {
     try {
       await loadStatus();
+      await loadRiskState();
       await loadWatchlist();
       await loadAlerts();
       await loadRunnerState();
@@ -2017,6 +2048,10 @@ async function init() {
   }, 10000);
 
   setInterval(() => {
+    loadConfigLight().catch(() => {});
+    loadRiskState().catch(() => {});
+    loadIntents().catch(() => {});
+    loadAuditSummary().catch(() => {});
     loadWatchlist().catch(() => {});
     loadPortfolio().catch(() => {});
     loadAlerts(true).catch(() => {});
