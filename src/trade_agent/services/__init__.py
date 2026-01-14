@@ -10,5 +10,6 @@ __all__ = [
     "reporting",
     "queries",
     "positions",
+    "portfolio",
     "alerts",
 ]

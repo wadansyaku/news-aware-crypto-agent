@@ -25,6 +25,7 @@ const state = {
   exposure: 0,
   watchlist: [],
   alerts: [],
+  portfolio: null,
 };
 
 function formatIso(value) {
@@ -375,6 +376,7 @@ async function loadStatus() {
   if (!$("backtest-symbol").value) $("backtest-symbol").value = defaultSymbol;
   updateAlertSymbolOptions();
   await loadPosition();
+  await loadPortfolio();
   await loadIntents();
 }
 
@@ -1038,6 +1040,98 @@ function drawPie(canvasId, dataMap) {
   });
 }
 
+function drawPortfolioPie(canvasId, positions, totalValue) {
+  const canvas = $(canvasId);
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  const width = canvas.clientWidth;
+  const height = canvas.clientHeight;
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = width * dpr;
+  canvas.height = height * dpr;
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, width, height);
+
+  if (!positions.length || totalValue <= 0) {
+    ctx.fillStyle = "#6f6a61";
+    ctx.font = "12px Hiragino Sans";
+    ctx.fillText("データなし", 10, 20);
+    return;
+  }
+
+  const colors = ["#0f766e", "#f59e0b", "#2563eb", "#b42318", "#6f6a61", "#0ea5e9"];
+  let startAngle = -Math.PI / 2;
+  positions.forEach((pos, idx) => {
+    const value = Math.max(0, pos.position_value || 0);
+    if (!value) return;
+    const slice = (value / totalValue) * Math.PI * 2;
+    ctx.beginPath();
+    ctx.moveTo(width / 2, height / 2);
+    ctx.arc(width / 2, height / 2, Math.min(width, height) / 2 - 6, startAngle, startAngle + slice);
+    ctx.closePath();
+    ctx.fillStyle = colors[idx % colors.length];
+    ctx.fill();
+    startAngle += slice;
+  });
+
+  const legend = $("portfolio-legend");
+  if (legend) {
+    legend.innerHTML = positions
+      .map((pos, idx) => {
+        const value = Math.max(0, pos.position_value || 0);
+        if (!value) return "";
+        const allocation = totalValue > 0 ? value / totalValue : 0;
+        return `<span class="legend-item"><span class="legend-swatch" style="background:${colors[idx % colors.length]}"></span>${pos.symbol} ${percent.format(allocation)}</span>`;
+      })
+      .join("");
+  }
+}
+
+function renderPortfolio(data) {
+  const positions = data?.positions || [];
+  const totalValue = Number(data?.total_value || 0);
+  const totalPnl = Number(data?.total_pnl || 0);
+  const totalNode = $("portfolio-total");
+  const pnlNode = $("portfolio-pnl");
+  if (totalNode) totalNode.textContent = currency.format(totalValue || 0);
+  if (pnlNode) pnlNode.textContent = currency.format(totalPnl || 0);
+
+  const tbody = $("portfolio-table")?.querySelector("tbody");
+  if (!tbody) return;
+  tbody.innerHTML = "";
+  if (!positions.length) {
+    tbody.innerHTML = "<tr><td colspan=\"7\">ポジションがありません</td></tr>";
+    drawPortfolioPie("portfolio-chart", [], totalValue);
+    const legend = $("portfolio-legend");
+    if (legend) legend.textContent = "";
+    return;
+  }
+
+  positions.forEach((pos) => {
+    const value = Number(pos.position_value || 0);
+    const allocation = totalValue > 0 ? value / totalValue : 0;
+    const row = document.createElement("tr");
+    row.innerHTML = `
+      <td>${pos.symbol}</td>
+      <td>${number.format(pos.size || 0)}</td>
+      <td>${pos.avg_price ? currency.format(pos.avg_price) : "-"}</td>
+      <td>${pos.current_price ? currency.format(pos.current_price) : "-"}</td>
+      <td>${currency.format(value || 0)}</td>
+      <td>${currency.format(pos.unrealized_pnl || 0)}</td>
+      <td>${percent.format(allocation || 0)}</td>
+    `;
+    tbody.appendChild(row);
+  });
+
+  drawPortfolioPie("portfolio-chart", positions, totalValue);
+}
+
+async function loadPortfolio() {
+  const data = await apiRequest("/api/portfolio");
+  state.portfolio = data;
+  renderPortfolio(data);
+}
+
 async function loadAnalytics(mode = "") {
   const query = mode ? `?mode=${encodeURIComponent(mode)}` : "";
   const data = await apiRequest(`/api/analytics${query}`);
@@ -1148,6 +1242,7 @@ async function handleApprove(event) {
         data.execution.status === "filled" ? "ok" : "info"
       );
       await loadPosition();
+      await loadPortfolio();
       await loadAnalytics($("report-mode").value);
       await loadAuditSummary();
     } else {
@@ -1181,6 +1276,7 @@ async function handleExecute(event) {
     });
     setOutput(output, "実行結果", [`${data.status}: ${data.message}`], data, data.status === "filled" ? "ok" : "info");
     await loadPosition();
+    await loadPortfolio();
     await loadAnalytics($("report-mode").value);
     await loadAuditSummary();
     await loadAudit();
@@ -1375,6 +1471,13 @@ async function init() {
     drawEquityWithDrawdown("backtest-equity-chart", state.backtestEquity || []);
     drawSentimentTimeline("news-sentiment-chart", state.newsTimeline || []);
     drawGauge("risk-gauge", state.exposure || 0);
+    if (state.portfolio) {
+      drawPortfolioPie(
+        "portfolio-chart",
+        state.portfolio.positions || [],
+        Number(state.portfolio.total_value || 0)
+      );
+    }
   });
 
   setInterval(() => {
@@ -1383,6 +1486,7 @@ async function init() {
 
   setInterval(() => {
     loadWatchlist().catch(() => {});
+    loadPortfolio().catch(() => {});
     loadAlerts(true).catch(() => {});
   }, 15000);
 }

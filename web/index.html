@@ -23,6 +23,7 @@
         <nav class="hero-nav">
           <a href="#overview">概要</a>
           <a href="#watchlist">ウォッチ</a>
+          <a href="#portfolio">ポートフォリオ</a>
           <a href="#ingest">取り込み</a>
           <a href="#plan">提案</a>
           <a href="#approval">承認</a>
@@ -213,9 +214,46 @@
         </div>
       </section>
 
-      <section class="card" id="ingest" data-step="2">
+      <section class="card" id="portfolio" data-step="2">
         <div class="card-head">
-          <h2>2. データ取り込み</h2>
+          <h2>ポートフォリオ</h2>
+          <p>複数シンボルの保有状況と配分を確認します。</p>
+        </div>
+        <div class="portfolio-summary">
+          <div class="summary-card">
+            <span class="label">合計評価額</span>
+            <strong id="portfolio-total">-</strong>
+          </div>
+          <div class="summary-card">
+            <span class="label">合計未実現PnL</span>
+            <strong id="portfolio-pnl">-</strong>
+          </div>
+        </div>
+        <div class="chart-card">
+          <canvas id="portfolio-chart" height="160"></canvas>
+        </div>
+        <div class="legend" id="portfolio-legend"></div>
+        <div class="table-wrap">
+          <table class="table" id="portfolio-table">
+            <thead>
+              <tr>
+                <th>シンボル</th>
+                <th>数量</th>
+                <th>平均価格</th>
+                <th>現在価格</th>
+                <th>評価額</th>
+                <th>未実現PnL</th>
+                <th>配分</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="card" id="ingest" data-step="3">
+        <div class="card-head">
+          <h2>3. データ取り込み</h2>
           <p>市場価格とニュースを最新化します。</p>
         </div>
         <form id="ingest-form" class="form">
@@ -242,9 +280,9 @@
         <div class="output" id="ingest-output"></div>
       </section>
 
-      <section class="card" id="plan" data-step="3">
+      <section class="card" id="plan" data-step="4">
         <div class="card-head">
-          <h2>3. 取引提案</h2>
+          <h2>4. 取引提案</h2>
           <p>戦略からトレードプランを生成します。</p>
         </div>
         <form id="propose-form" class="form">
@@ -277,9 +315,9 @@
         <div class="output" id="propose-output"></div>
       </section>
 
-      <section class="card" id="approval" data-step="4">
+      <section class="card" id="approval" data-step="5">
         <div class="card-head">
-          <h2>4. 承認</h2>
+          <h2>5. 承認</h2>
           <p>提案された取引を確認し、承認フレーズで許可します。</p>
         </div>
         <div class="table-wrap">
@@ -323,9 +361,9 @@
         <div class="output" id="approve-output"></div>
       </section>
 
-      <section class="card" id="execute" data-step="5">
+      <section class="card" id="execute" data-step="6">
         <div class="card-head">
-          <h2>5. 実行</h2>
+          <h2>6. 実行</h2>
           <p>承認済みの取引を実行します（デフォルトはペーパー）。</p>
         </div>
         <form id="execute-form" class="form">
@@ -347,9 +385,9 @@
         <div class="output" id="execute-output"></div>
       </section>
 
-      <section class="card" id="report" data-step="6">
+      <section class="card" id="report" data-step="7">
         <div class="card-head">
-          <h2>6. レポート & PnL</h2>
+          <h2>7. レポート & PnL</h2>
           <p>成績の推移を視覚的に確認します。</p>
         </div>
         <form id="report-form" class="form">
@@ -391,7 +429,7 @@
         </div>
       </section>
 
-      <section class="card" id="backtest" data-step="7">
+      <section class="card" id="backtest" data-step="8">
         <div class="card-head">
           <h2>バックテストダッシュボード</h2>
           <p>過去データでの戦略パフォーマンスを可視化します。</p>
@@ -462,7 +500,7 @@
         </div>
       </section>
 
-      <section class="card" id="news" data-step="8">
+      <section class="card" id="news" data-step="9">
         <div class="card-head">
           <h2>News Insights</h2>
           <p>ニュースセンチメントとキーワードを可視化します。</p>
@@ -483,7 +521,7 @@
         </div>
       </section>
 
-      <section class="card" id="audit" data-step="9">
+      <section class="card" id="audit" data-step="10">
         <div class="card-head">
           <h2>監査ログ</h2>
           <p>risk_check など重要な判断理由を分析できます。</p>
@@ -525,7 +563,7 @@
         <div class="audit-list" id="audit-list"></div>
       </section>
 
-      <section class="card" id="guide" data-step="10">
+      <section class="card" id="guide" data-step="11">
         <div class="card-head">
           <h2>取引所切替の簡易ガイド</h2>
           <p>スポット対応・ローソク取得可否を基準に選択してください。</p>

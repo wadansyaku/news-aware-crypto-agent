@@ -15,6 +15,7 @@ from trade_agent.services import (
     context,
     execution,
     ingest,
+    portfolio,
     positions,
     propose,
     queries,
@@ -417,6 +418,16 @@ async def position_api(symbol: Optional[str] = None) -> dict:
     store = context.open_store(settings)
     try:
         return queries.position(settings, store, symbol)
+    finally:
+        store.close()
+
+
+@app.get("/api/portfolio")
+async def portfolio_api() -> dict:
+    settings = _load_settings()
+    store = context.open_store(settings)
+    try:
+        return portfolio.get_portfolio(settings, store)
     finally:
         store.close()
 
